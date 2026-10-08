@@ -189,5 +189,36 @@ Utility currently uses an explicitly configured exact substring, not a semantic
 judge. Controls without an oracle remain inconclusive and still report transport
 health separately.
 
-Next: **F0-08**, persist the phase journal and evidence links. F0-08 and subsequent
-tasks remain outstanding.
+## F0-08 — persistent phase journal and evidence links
+
+Implemented:
+
+- Separate `events.jsonl` with phase-journal-1.0 schema, immediate append/fsync,
+  request/response/inspection/skip/error/verdict events; lifecycle `trace.jsonl`
+  keeps its existing schema.
+- Unique attempt IDs, actual attempt/run timestamps and result/detection links
+  to journal event IDs. Later evidence failures preserve observed text signals.
+- Explicit coverage for phase initialization/write, lifecycle emission and flush
+  failures; incomplete persistence never produces a complete report status.
+- Interrupted matrix/adaptive runs preserve completed attempts/rounds, the current
+  failure and remaining selected cases. Atomic `run.partial.json` checkpoints,
+  exception-attached reports and CLI output with exit 130 for KeyboardInterrupt.
+- Existing redactor plus known credential masking applied to new phase content
+  before preview truncation. Structural IDs/references remain stable during
+  partial-report redaction. Full output redaction remains F0-09.
+
+Validation on Linux/Python 3.12:
+
+- 19 new regression cases cover every verdict, references, real subprocess exit,
+  repeated attempts, actual timestamps, redaction boundaries, emission/disk/flush
+  errors, CLI and adaptive interruption, state evidence and partial reports.
+- Full `python -m pytest -ra`: **594 passed, 5 skipped** (stand source/dependencies
+  unavailable). `git diff --check` passed.
+
+Without an output path, coverage explicitly says memory_only. An unwritable output
+directory can prevent checkpoints; errors remain in the in-memory report. A hard
+process kill preserves already-fsynced phase events but need not produce a partial
+report. Use separate output directories to retain previous runs.
+
+Next: **F0-09**, unified redaction before all outputs. F0-09 and subsequent tasks
+remain outstanding.

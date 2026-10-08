@@ -10,6 +10,7 @@ methods and never knows which concrete target is bound.
 from __future__ import annotations
 
 import uuid
+import time
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from ..adapters.base import AdapterCapabilities, TargetAdapter
@@ -188,12 +189,94 @@ def _judge(variant: AttackVariant, adapter: TargetAdapter, caps: AdapterCapabili
     return verdict, tier, chain_break, limitations
 
 
+def _finish_attempt(result, tracer, run_id, started, event_start):
+    tracer.log(run_id=run_id, trace_id=result.variant_id, phase="verdict", verdict=result.verdict.value)
+    result.attempt_id = tracer.attempt_id
+    result.started_at = started
+    events = tracer.events[event_start:]
+    result.trace_event_ids = [event.event_id for event in events]
+    for name, phase, direction in (("baseline", "baseline", "response"), ("post", "probe", "response"),
+                                    ("state", "memory_inspection", "inspection"),
+                                    ("ground_truth", "ground_truth", "inspection"), ("error", "error", None),
+                                    ("cleanup_error", "unstage_tool", "decision")):
+        matches = [e for e in events if e.phase == phase and (direction is None or e.direction == direction)]
+        if not matches and name == "post" and result.case_kind == "benign_control":
+            matches = [e for e in events if e.phase == "control" and e.direction == "response"]
+        if matches:
+            event = matches[-1]
+            result.evidence_event_refs[name] = event.event_id
+            field = {"baseline": "baseline_detection", "post": "post_detection", "state": "state_detection",
+                     "ground_truth": "ground_truth_detection"}.get(name)
+            if field:
+                detection = getattr(result, field)
+                # A later transport/evidence error must not erase an already
+                # observed response signal from the result.
+                if detection is None and event.canary_present is not None:
+                    channel = {"baseline": DetectionChannel.RESPONSE_TEXT, "post": DetectionChannel.RESPONSE_TEXT,
+                               "state": DetectionChannel.MEMORY_INSPECTION, "ground_truth": DetectionChannel.GROUND_TRUTH}[name]
+                    detection = DetectionResult(event.canary_present, channel, observed=event.observation_available is not False)
+                    setattr(result, field, detection)
+                if detection is not None:
+                    detection.evidence_ref = event.event_id
+    result.evidence_tier = evidence_tier_for(result.post_detection, result.state_detection, result.ground_truth_detection)
+    for field in ("post_detection", "state_detection", "ground_truth_detection"):
+        detection = getattr(result, field)
+        ref = {"kind": "runtime_path_observed", "ref": f"#/{field}"}
+        if detection is not None and detection.observed and detection.canary_present and ref not in result.evidence_refs:
+            result.evidence_refs.append(ref)
+    result.path_state = path_state_for(result.verdict, evidence_refs=result.evidence_refs)
+    try:
+        tracer.flush()
+    except Exception as exc:
+        tracer.persistence_errors.append(f"trace flush: {type(exc).__name__}")
+    result.trace_coverage = tracer.coverage()
+    result.finished_at = time.time()
+    tracer.attempt_id = None
+    tracer.attempt_results.append((run_id, result))
+    return result
+
+
 def run_variant(variant: AttackVariant, channels: List[Channel], adapter: TargetAdapter,
                 detector: Detector, tracer: JSONLTracer, run_id: str) -> AttackResult:
+    started = time.time()
+    event_start = len(tracer.events)
+    tracer.attempt_id = uuid.uuid4().hex
+    tracer.log(run_id=run_id, trace_id=variant.id, phase="attempt_start")
     try:
-        return _run_variant(variant, channels, adapter, detector, tracer, run_id)
-    finally:
-        tracer.flush()
+        result = _run_variant(variant, channels, adapter, detector, tracer, run_id)
+    except BaseException as exc:
+        tracer.log(run_id=run_id, trace_id=variant.id, phase="error", error=f"{type(exc).__name__}: {exc}")
+        result = _tagged(variant, verdict=Verdict.ERROR, error=f"{type(exc).__name__}: {exc}")
+        tracer.last_interrupted_result = _finish_attempt(result, tracer, run_id, started, event_start)
+        raise
+    return _finish_attempt(result, tracer, run_id, started, event_start)
+
+
+def _unexecuted_result(variant, tracer, run_id):
+    started = time.time()
+    event_start = len(tracer.events)
+    tracer.attempt_id = uuid.uuid4().hex
+    reason = "run interrupted before this selected case executed"
+    tracer.log(run_id=run_id, trace_id=variant.id, phase="skip", text=reason)
+    return _finish_attempt(_tagged(variant, verdict=Verdict.NOT_EVALUATED, limitations=[reason]),
+                           tracer, run_id, started, event_start)
+
+
+def interrupted_report(variants, channels, adapter, tracer, run_id):
+    """Preserve completed adaptive rounds and explicitly journal unrun selections."""
+    from ..reporting.aggregate import aggregate
+    results = [result for recorded_run, result in tracer.attempt_results if recorded_run == run_id]
+    present = {result.variant_id for result in results}
+    for variant in variants:
+        if variant.id not in present:
+            results.append(_unexecuted_result(variant, tracer, run_id))
+    report = RunReport(run_id, adapter.kind, results=results, channels=list(channels),
+                       selected_variants=list(variants), trace_path=tracer.path, run_status="interrupted",
+                       started_at=min((r.started_at for r in results), default=time.time()), finished_at=time.time())
+    tracer.update_report(report)
+    aggregate(report)
+    tracer.save_partial_report(report)
+    return report
 
 
 def _run_variant(variant: AttackVariant, channels: List[Channel], adapter: TargetAdapter,
@@ -254,6 +337,8 @@ def _run_variant(variant: AttackVariant, channels: List[Channel], adapter: Targe
 def _run_benign_control(variant, channels, adapter, detector, tracer, run_id):
     channel = _pick_channel(channels, "benign_control", variant.attacker_principal)
     session = adapter.new_session(channel.principal)
+    tracer.log(run_id=run_id, trace_id=variant.id, phase="control", session_id=session,
+               principal=channel.principal.principal_id, direction="request", text=variant.probe)
     response = adapter.send(channel.principal, session, variant.probe)
     received = isinstance(response, str) and bool(response.strip())
     utility = (variant.expected_response in response if received else None) if variant.expected_response else None
@@ -271,8 +356,8 @@ def _run_benign_control(variant, channels, adapter, detector, tracer, run_id):
                    control_utility=utility, control_false_positive=false_positive, limitations=limitations)
 
 
-def _mark_ground_truth(adapter, variant, principal, session_id, run_id):
-    return adapter.ground_truth_mark(run_id=run_id, attempt_id=uuid.uuid4().hex,
+def _mark_ground_truth(adapter, variant, principal, session_id, run_id, attempt_id):
+    return adapter.ground_truth_mark(run_id=run_id, attempt_id=attempt_id,
                                      principal=principal, session_id=session_id, target_ref=variant.target_ref)
 
 
@@ -293,18 +378,18 @@ def _run_single_turn_control(variant: AttackVariant, channels: List[Channel], ad
     tracer.log(run_id=run_id, trace_id=variant.id, principal=channel.principal.principal_id,
               phase="probe", channel_id=channel.channel_id, session_id=session_id,
               direction="request", text=variant.probe, canary=marker)
-    window = _mark_ground_truth(adapter, variant, channel.principal, session_id, run_id)
+    window = _mark_ground_truth(adapter, variant, channel.principal, session_id, run_id, tracer.attempt_id)
     response = adapter.send(channel.principal, session_id, variant.probe)
     text_det = detector.detect(response, marker, DetectionChannel.RESPONSE_TEXT)
     tracer.log(run_id=run_id, trace_id=variant.id, principal=channel.principal.principal_id,
               phase="probe", channel_id=channel.channel_id, session_id=session_id,
-              direction="response", text=response, canary=marker, canary_present=text_det.canary_present)
+              direction="response", text=response, canary=marker, canary_present=text_det.canary_present, observation_available=text_det.observed)
 
     gt_present = _check_ground_truth(adapter, marker, variant.target_ref, window)
     gt_det = GroundTruthDetector.wrap(gt_present)
     if gt_det is not None:
         tracer.log(run_id=run_id, trace_id=variant.id, phase="ground_truth", direction="inspection",
-                  canary=marker, canary_present=gt_det.canary_present)
+                  canary=marker, canary_present=gt_det.canary_present, observation_available=gt_det.observed)
 
     # INVALID is structurally impossible: no baseline phase
     verdict, tier, _, limitations = _judge(variant, adapter, adapter.capabilities(), tracer, run_id, canary=marker,
@@ -341,7 +426,7 @@ def _run_canary_flow(variant: AttackVariant, channels: List[Channel], adapter: T
     tracer.log(run_id=run_id, trace_id=variant.id, principal=victim.principal.principal_id,
               phase="baseline", channel_id=victim.channel_id, session_id=baseline_session,
               direction="response", text=baseline_response, canary=canary,
-              canary_present=baseline_text_det.canary_present)
+              canary_present=baseline_text_det.canary_present, observation_available=baseline_text_det.observed)
 
     baseline_mem_det = None
     if caps.supports_inspect_memory:
@@ -349,7 +434,8 @@ def _run_canary_flow(variant: AttackVariant, channels: List[Channel], adapter: T
         baseline_mem_det = detector.detect(mem_text, canary, DetectionChannel.MEMORY_INSPECTION)
         tracer.log(run_id=run_id, trace_id=variant.id, principal=victim.principal.principal_id,
                   phase="baseline", direction="inspection", canary=canary,
-                  canary_present=baseline_mem_det.canary_present, memory={"channel": "inspect_memory"})
+                  canary_present=baseline_mem_det.canary_present, observation_available=baseline_mem_det.observed,
+                  text=mem_text, memory={"channel": "inspect_memory"})
 
     baseline_present = _or_present(baseline_text_det, baseline_mem_det)
     if baseline_present:
@@ -384,7 +470,7 @@ def _run_canary_flow(variant: AttackVariant, channels: List[Channel], adapter: T
     tracer.log(run_id=run_id, trace_id=variant.id, principal=victim.principal.principal_id,
               phase="probe", channel_id=victim.channel_id, session_id=probe_session,
               direction="request", text=variant.probe, canary=canary)
-    window = (_mark_ground_truth(adapter, variant, victim.principal, probe_session, run_id)
+    window = (_mark_ground_truth(adapter, variant, victim.principal, probe_session, run_id, tracer.attempt_id)
               if caps.supports_ground_truth else None)
     probe_response = adapter.send(victim.principal, probe_session, variant.probe)
     post_text_det = detector.detect(probe_response, canary, DetectionChannel.RESPONSE_TEXT)
@@ -392,15 +478,15 @@ def _run_canary_flow(variant: AttackVariant, channels: List[Channel], adapter: T
     tracer.log(run_id=run_id, trace_id=variant.id, principal=victim.principal.principal_id,
               phase="probe", channel_id=victim.channel_id, session_id=probe_session,
               direction="response", text=probe_response, canary=canary,
-              canary_present=post_text_det.canary_present)
+              canary_present=post_text_det.canary_present, observation_available=post_text_det.observed)
 
     post_mem_det = None
     if caps.supports_inspect_memory:
         mem_text = adapter.inspect_memory(victim.principal)
         post_mem_det = detector.detect(mem_text, canary, DetectionChannel.MEMORY_INSPECTION)
         tracer.log(run_id=run_id, trace_id=variant.id, principal=victim.principal.principal_id,
-                  phase="memory_inspection", direction="inspection", canary=canary,
-                  canary_present=post_mem_det.canary_present)
+                  phase="memory_inspection", direction="inspection", canary=canary, text=mem_text,
+                  canary_present=post_mem_det.canary_present, observation_available=post_mem_det.observed)
 
     gt_det = None
     if caps.supports_ground_truth:
@@ -408,7 +494,7 @@ def _run_canary_flow(variant: AttackVariant, channels: List[Channel], adapter: T
         gt_det = GroundTruthDetector.wrap(gt_present)
         if gt_det is not None:
             tracer.log(run_id=run_id, trace_id=variant.id, phase="ground_truth", direction="inspection",
-                      canary=canary, canary_present=gt_det.canary_present)
+                      canary=canary, canary_present=gt_det.canary_present, observation_available=gt_det.observed)
 
     verdict, tier, chain_break, limitations = _judge(
         variant, adapter, caps, tracer, run_id, canary=canary, baseline_present=baseline_present,
@@ -461,7 +547,7 @@ def _run_tool_injection_flow(variant: AttackVariant, channels: List[Channel], ad
     tracer.log(run_id=run_id, trace_id=variant.id, principal=victim.principal.principal_id,
               phase="baseline", channel_id=victim.channel_id, session_id=baseline_session,
               direction="response", text=baseline_response, canary=canary,
-              canary_present=baseline_text_det.canary_present)
+              canary_present=baseline_text_det.canary_present, observation_available=baseline_text_det.observed)
 
     baseline_present = baseline_text_det.canary_present
     if baseline_present:
@@ -544,15 +630,15 @@ def _run_tool_injection_flow(variant: AttackVariant, channels: List[Channel], ad
     tracer.log(run_id=run_id, trace_id=variant.id, principal=probe_channel.principal.principal_id,
               phase="probe", channel_id=probe_channel.channel_id, session_id=probe_session,
               direction="response", text=probe_response, canary=canary,
-              canary_present=post_text_det.canary_present)
+              canary_present=post_text_det.canary_present, observation_available=post_text_det.observed)
 
     post_mem_det = None
     if caps.supports_inspect_memory:
         mem_text = adapter.inspect_memory(probe_channel.principal)
         post_mem_det = detector.detect(mem_text, canary, DetectionChannel.MEMORY_INSPECTION)
         tracer.log(run_id=run_id, trace_id=variant.id, principal=probe_channel.principal.principal_id,
-                  phase="memory_inspection", direction="inspection", canary=canary,
-                  canary_present=post_mem_det.canary_present)
+                  phase="memory_inspection", direction="inspection", canary=canary, text=mem_text,
+                  canary_present=post_mem_det.canary_present, observation_available=post_mem_det.observed)
 
     verdict, tier, chain_break, limitations = _judge(
         variant, adapter, caps, tracer, run_id, canary=canary, baseline_present=baseline_present,
@@ -597,7 +683,7 @@ def _run_document_ingestion_flow(variant: AttackVariant, channels: List[Channel]
     tracer.log(run_id=run_id, trace_id=variant.id, principal=probe_channel.principal.principal_id,
               phase="baseline", channel_id=probe_channel.channel_id, session_id=baseline_session,
               direction="response", text=baseline_response, canary=canary,
-              canary_present=baseline_text_det.canary_present)
+              canary_present=baseline_text_det.canary_present, observation_available=baseline_text_det.observed)
 
     if baseline_text_det.canary_present:
         tracer.log(run_id=run_id, trace_id=variant.id, phase="verdict", verdict=Verdict.INVALID.value)
@@ -633,15 +719,15 @@ def _run_document_ingestion_flow(variant: AttackVariant, channels: List[Channel]
     tracer.log(run_id=run_id, trace_id=variant.id, principal=probe_channel.principal.principal_id,
               phase="probe", channel_id=probe_channel.channel_id, session_id=probe_session,
               direction="response", text=probe_response, canary=canary,
-              canary_present=post_text_det.canary_present)
+              canary_present=post_text_det.canary_present, observation_available=post_text_det.observed)
 
     post_mem_det = None
     if caps.supports_inspect_memory:
         mem_text = adapter.inspect_memory(probe_channel.principal)
         post_mem_det = detector.detect(mem_text, canary, DetectionChannel.MEMORY_INSPECTION)
         tracer.log(run_id=run_id, trace_id=variant.id, principal=probe_channel.principal.principal_id,
-                  phase="memory_inspection", direction="inspection", canary=canary,
-                  canary_present=post_mem_det.canary_present)
+                  phase="memory_inspection", direction="inspection", canary=canary, text=mem_text,
+                  canary_present=post_mem_det.canary_present, observation_available=post_mem_det.observed)
 
     verdict, tier, chain_break, limitations = _judge(
         variant, adapter, caps, tracer, run_id, canary=canary, baseline_present=False,
@@ -669,20 +755,39 @@ def run_matrix(variants: List[AttackVariant], channels: List[Channel], adapter: 
     reset_note_added = False
     total = len(variants)
 
-    for i, variant in enumerate(variants):
-        if reset_between_variants and adapter.tool_staging_cleanup_error is None:
-            if not adapter.reset() and not reset_note_added:
-                limitations.append(
-                    "adapter does not support reset(); variants share target state across this run -- "
-                    "the mandatory per-variant baseline phase is the cross-variant contamination safety net"
-                )
-                reset_note_added = True
-        result = run_variant(variant, channels, adapter, detector, tracer, run_id)
-        results.append(result)
-        if progress_hook is not None:
-            progress_hook(i, total, variant, result)
+    started = time.time()
+    tracer.last_interrupted_result = None
+    interrupted = None
+    try:
+        for i, variant in enumerate(variants):
+            if reset_between_variants and adapter.tool_staging_cleanup_error is None:
+                if not adapter.reset() and not reset_note_added:
+                    limitations.append(
+                        "adapter does not support reset(); variants share target state across this run -- "
+                        "the mandatory per-variant baseline phase is the cross-variant contamination safety net"
+                    )
+                    reset_note_added = True
+            result = run_variant(variant, channels, adapter, detector, tracer, run_id)
+            results.append(result)
+            if progress_hook is not None:
+                progress_hook(i, total, variant, result)
+    except (KeyboardInterrupt, SystemExit) as exc:
+        interrupted = exc
+        if tracer.last_interrupted_result is not None:
+            if not results or results[-1] is not tracer.last_interrupted_result:
+                results.append(tracer.last_interrupted_result)
+        for remaining in variants[len(results):]:
+            results.append(_unexecuted_result(remaining, tracer, run_id))
 
     report = RunReport(run_id=run_id, target_id=adapter.kind, results=results, channels=list(channels),
                        limitations=limitations, trace_path=tracer.path, selected_variants=list(variants))
+    report.started_at = started
+    report.finished_at = time.time()
+    report.run_status = "interrupted" if interrupted is not None else "completed"
+    tracer.update_report(report)
     aggregate(report)
+    if interrupted is not None:
+        tracer.save_partial_report(report)
+        interrupted.partial_report = report
+        raise interrupted
     return report

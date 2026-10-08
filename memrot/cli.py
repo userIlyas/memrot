@@ -318,8 +318,23 @@ def _cmd_run(args: argparse.Namespace, cleanup: ExitStack) -> int:
             if close_progress is not None:
                 close_progress()
             report.limitations = limitations + report.limitations
+    except (KeyboardInterrupt, SystemExit) as exc:
+        report = getattr(exc, "partial_report", None)
+        if report is None:
+            from .runner.engine import interrupted_report
+            report = interrupted_report(locals().get("selected_inventory", variants), config.channels,
+                                        adapter, tracer, locals().get("run_id", "interrupted"))
+        tracer.close()
+        tracer.update_report(report)
+        tracer.save_partial_report(report)
+        _emit_and_status(report, args, variants=variants)
+        if isinstance(exc, KeyboardInterrupt):
+            return 130
+        raise
     finally:
         tracer.close()
+    tracer.update_report(report)
+
 
     if fancy:
         print()
@@ -341,7 +356,7 @@ def _cmd_run(args: argparse.Namespace, cleanup: ExitStack) -> int:
         summary_lines.append("")
         summary_lines.append("DISCLAIMER: this report may contain harmful/offensive language from attack payloads.")
         if out_dir:
-            summary_lines.append(f"Reports written to: {out_dir}/ (run.json, run.md, trace.jsonl)")
+            summary_lines.append(f"Reports written to: {out_dir}/ (run.json, run.md, trace.jsonl, events.jsonl)")
         if getattr(args, "report_html", None):
             summary_lines.append(f"HTML dashboard: {args.report_html}")
         ui.print_panel("Summary", summary_lines)
@@ -389,6 +404,8 @@ def _emit_and_status(report: RunReport, args: argparse.Namespace,
 
     counts = report.counts_by_verdict
     gate_counts = dict(counts)
+    if report.run_status == "interrupted" or report.trace_coverage.get("status") == "incomplete":
+        gate_counts["INCONCLUSIVE"] = gate_counts.get("INCONCLUSIVE", 0) + 1
     gate_counts["CONFIRMED"] = sum(r.case_kind == "attack" and r.verdict is Verdict.CONFIRMED for r in report.results)
     if any(r.case_kind != "attack" and (r.verdict is Verdict.CONFIRMED or r.control_utility is False) for r in report.results):
         gate_counts["INCONCLUSIVE"] = gate_counts.get("INCONCLUSIVE", 0) + 1
@@ -396,7 +413,7 @@ def _emit_and_status(report: RunReport, args: argparse.Namespace,
         "run_id": report.run_id,
         "counts_by_verdict": counts,
         "overall_asr": report.overall_asr.display if report.overall_asr else "n/a (0/0)",
-        "exit_code": _exit_code(gate_counts, bool(getattr(args, "gate", False))),
+        "exit_code": 130 if report.run_status == "interrupted" else _exit_code(gate_counts, bool(getattr(args, "gate", False))),
     }
     print(json.dumps(status, ensure_ascii=False), file=sys.stderr)
     return status["exit_code"]
@@ -485,6 +502,7 @@ def cmd_quickstart(args: argparse.Namespace) -> int:
     os.makedirs(out_dir, exist_ok=True)
     if not args.report_html:
         args.report_html = os.path.join(out_dir, "run.html")
+    args.out = out_dir
     tracer = JSONLTracer(path=os.path.join(out_dir, "trace.jsonl"))
     try:
         report = audit_then_attack(
@@ -495,8 +513,17 @@ def cmd_quickstart(args: argparse.Namespace) -> int:
     except (ValueError, FileNotFoundError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    except (KeyboardInterrupt, SystemExit) as exc:
+        if getattr(exc, "partial_report", None) is not None:
+            tracer.close()
+            tracer.update_report(exc.partial_report)
+            _emit_and_status(exc.partial_report, args, formats=["json", "markdown", "html"])
+        if isinstance(exc, KeyboardInterrupt):
+            return 130
+        raise
     finally:
         tracer.close()
+    tracer.update_report(report)
     args.out = out_dir
     return _emit_and_status(report, args, formats=["json", "markdown", "html"])
 

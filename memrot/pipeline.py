@@ -116,9 +116,16 @@ def audit_then_attack(audit_json_path: Optional[str], target: TargetBinding, cha
                 report = run_matrix(variants, channels, bound, det, tr,
                                     reset_between_variants=reset_between_variants)
                 report.limitations = limitations + report.limitations
+        except (KeyboardInterrupt, SystemExit) as exc:
+            if getattr(exc, "partial_report", None) is None:
+                from .runner.engine import interrupted_report
+                exc.partial_report = interrupted_report(locals().get("selected_inventory", variants), channels,
+                                                        bound, tr, locals().get("run_id", "interrupted"))
+            raise
         finally:
             if own_tracer:
                 tr.close()
+        tr.update_report(report)
         return report
     finally:
         if adapter is None:

@@ -245,7 +245,7 @@ def test_stdio_cross_user_is_skipped_before_starting_any_process(monkeypatch):
     result = run_variant(_variant(), CHANNELS, adapter, LiteralDetector(), tracer, "stdio-run")
     assert result.verdict is Verdict.NOT_EVALUATED
     assert "cannot switch authenticated principals" in result.limitations[0]
-    assert [e.phase for e in tracer.events] == ["skip"]
+    assert [e.phase for e in tracer.events] == ["attempt_start", "skip", "verdict"]
     assert not spawned
 
 

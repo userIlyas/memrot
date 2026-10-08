@@ -280,6 +280,9 @@ class AttackResult:
     finished_at: Optional[float] = None
     error: Optional[str] = None
     limitations: List[str] = field(default_factory=list)
+    attempt_id: Optional[str] = None
+    evidence_event_refs: Dict[str, str] = field(default_factory=dict)
+    trace_coverage: Dict[str, Any] = field(default_factory=dict)
     trace_event_ids: List[str] = field(default_factory=list)
     path_state: str = ""  # mcp_audit PathState string; set by the engine from verdict + propagation
     evidence_tier: EvidenceTier = "none"          # strongest channel that saw the canary, see EVIDENCE_TIER_ORDER
@@ -351,6 +354,9 @@ class RunReport:
     counts_by_verdict: Dict[str, int] = field(default_factory=dict)
     limitations: List[str] = field(default_factory=list)
     trace_path: Optional[str] = None
+    events_path: Optional[str] = None
+    run_status: str = "completed"
+    trace_coverage: Dict[str, Any] = field(default_factory=dict)
     selected_variants: List[AttackVariant] = field(default_factory=list)
     coverage_by_case_kind: Dict[str, Any] = field(default_factory=dict)
     controls: Dict[str, Any] = field(default_factory=dict)
@@ -381,6 +387,10 @@ class RunReport:
             "counts_by_verdict": dict(self.counts_by_verdict),
             "limitations": list(self.limitations),
             "trace_path": self.trace_path,
+            "events_path": self.events_path,
+            "run_status": self.run_status,
+            "report_status": "incomplete" if self.run_status == "interrupted" or self.trace_coverage.get("status") == "incomplete" else "complete",
+            "trace_coverage": plain(self.trace_coverage),
         }
 
 

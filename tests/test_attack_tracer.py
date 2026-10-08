@@ -37,7 +37,7 @@ def test_tracer_writes_lifecycle_events_as_jsonl(tmp_path):
     tracer.close()
 
     objs = [json.loads(line) for line in open(path, encoding="utf-8").read().splitlines()]
-    assert len(objs) == 2          # phase events stay in memory, lifecycle events go to disk
+    assert len(objs) == 2          # lifecycle events remain separate from the phase journal
     for obj in objs:
         validate_event(obj)
     assert tracer.lifecycle_events == []

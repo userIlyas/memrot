@@ -91,6 +91,49 @@ verdict describes the detector check, not attack success or overall utility;
 always inspect the separate utility outcome. With `--gate`, failed utility or a
 control false positive returns incomplete (2), unless an attack is confirmed (1).
 
+## Phase journal and interrupted runs
+
+With an output path, the harness writes two separate streams:
+
+- `trace.jsonl` retains the memory-trace 0.1.0 lifecycle schema.
+- `events.jsonl` records requests, responses, inspections, skips, errors and
+  verdicts using `schema_version: phase-journal-1.0`. Each phase is appended and
+  fsynced immediately. A final verdict event also exists for skipped/error cases.
+
+Each executed attempt has a fresh `attempt_id`, even when a variant is repeated.
+The result carries actual `started_at`/`finished_at`, `trace_event_ids`, and
+`evidence_event_refs` for available baseline, post, state, ground-truth and error
+observations. Detection `evidence_ref` values resolve to `event_id` values in
+`events.jsonl`. Result-local `evidence_refs` remain separate from journal links.
+Ground-truth requests use the same attempt identifier. A later error preserves
+an already observed response signal and its journal reference.
+
+The journal stores digests and bounded redacted previews, not complete raw
+messages. Known `MEMROT_CRED_*` values and canaries are masked before preview
+truncation; existing redactor rules also apply to phase errors and tool/memory
+metadata. This is the prerequisite protection for this new output. Unified
+redaction of every existing report/console path remains F0-09.
+
+`trace_coverage` reports written phase counts and emission/initialization/flush
+errors. A persistence error yields `report_status: incomplete`, even when attack
+execution finished. `--gate` returns 2 for incomplete trace coverage unless a
+confirmed attack takes precedence (1). Partial writes are not retried blindly;
+coverage records the gap. Without a path, coverage is explicitly `memory_only`.
+
+On `KeyboardInterrupt` or `SystemExit`, matrix execution retains completed
+attempts, records the interrupted attempt, and journals remaining selected cases
+as `NOT_EVALUATED`. It saves `run.partial.json` beside the streams and attaches
+the partial report to the raised exception for library callers. Adaptive runs
+retain earlier rounds too. The CLI writes the ordinary report files on a caught
+interrupt and exits 130; an explicit SystemExit is re-raised after saving.
+If the output directory itself is unwritable, persistence cannot be guaranteed;
+the in-memory report carries the failure. A hard process kill can leave only the
+already-fsynced journal, without a partial report checkpoint.
+
+Files are initialized for a new run; use a separate output directory when
+retaining earlier runs. A disk failure can leave a partial final JSONL line and
+unwritten references; those are coverage gaps, not a complete evidence chain.
+
 ## Modes and access profiles
 
 | Access profile | What the adapter can see | Typical adapter |

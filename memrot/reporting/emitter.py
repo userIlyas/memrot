@@ -30,6 +30,8 @@ def emit_markdown(report: RunReport) -> str:
     L.append(f"# Attack run report: {report.run_id}")
     L.append("")
     L.append("- Verdict semantics: evidence-aware-v2 (report schema 2.1)")
+    L.append(f"- Report status: {report.to_dict()['report_status']}; journal: {esc(report.events_path or 'memory only')}")
+    L.append(f"- Trace coverage: {esc(report.trace_coverage, limit=1000)}")
     L.append(f"- Target: `{esc(report.target_id)}`")
     L.append(f"- Channels: {', '.join(esc(c.channel_id) for c in report.channels)}")
     L.append(f"- Verdict counts: {esc(dict(report.counts_by_verdict))}")

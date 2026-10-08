@@ -315,6 +315,8 @@ def emit_html(report: RunReport, variants: Optional[Iterable[AttackVariant]] = N
   <h1>Attack run report: {_esc(report.run_id)}</h1>
   <p class="muted">Verdict semantics: evidence-aware-v2 (report schema 2.1)</p>
   <div class="meta">Target: <code>{_esc(report.target_id)}</code> &middot; Started {started} &middot; Finished {finished}</div>
+  <p>Report status: {_esc(data["report_status"])}; journal: {_esc(report.events_path or "memory only")}</p>
+  <p>Trace coverage: {_esc(report.trace_coverage)}</p>
   <div class="kpi-row">{"".join(kpis)}</div>
   <div>{verdict_chips}</div>
 

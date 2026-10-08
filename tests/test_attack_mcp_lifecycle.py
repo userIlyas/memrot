@@ -279,7 +279,10 @@ def test_cli_closes_on_success_and_every_post_handshake_exit(failure, run_config
         def fail(*args, **kwargs):
             raise (OSError("report failure") if failure == "report" else KeyboardInterrupt())
         monkeypatch.setattr(cli, "_emit_and_status" if failure == "report" else "run_matrix", fail)
-    if failure in ("audit", "report", "interrupt"):
+    if failure == "interrupt":
+        assert cli.main(args) == 130
+        assert (tmp_path / "out" / "run.partial.json").exists()
+    elif failure in ("audit", "report"):
         with pytest.raises((FileNotFoundError, OSError, KeyboardInterrupt)):
             cli.main(args)
     else:
