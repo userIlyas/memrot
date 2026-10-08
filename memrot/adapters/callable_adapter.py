@@ -10,6 +10,7 @@ directly in code instead.
 """
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Dict, List, Optional
 
 from ..models import ConsolidationReport, Principal
@@ -30,7 +31,7 @@ ConsolidationReportFn = Callable[[str, str], Optional[ConsolidationReport]]
 
 class CallableAdapter(TargetAdapter):
     kind = "callable"
-    adapter_version = "1.0.0"
+    adapter_version = "1.1.0"
 
     def __init__(self, *, send_fn: SendFn, new_session_fn: Optional[NewSessionFn] = None,
                  consolidate_fn: Optional[ConsolidateFn] = None,
@@ -51,6 +52,7 @@ class CallableAdapter(TargetAdapter):
         self._ground_truth_fn = ground_truth_fn
         self._reset_fn = reset_fn
         self._stage_tool_fn = stage_tool_fn
+        self._stage_keyword_names = self._stage_keywords(stage_tool_fn)
         self._unstage_tool_fn = unstage_tool_fn
         self._ingest_fn = ingest_fn
         self._inspect_layers_fn = inspect_layers_fn
@@ -60,6 +62,23 @@ class CallableAdapter(TargetAdapter):
             ["web_search"] if stage_tool_fn is not None else []
         )
         self._session_counter = 0
+
+    @staticmethod
+    def _stage_keywords(fn: Optional[StageToolFn]) -> tuple[str, ...]:
+        if fn is None:
+            return ()
+        try:
+            signature = inspect.signature(fn)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("stage_tool_fn must have an inspectable signature; wrap it in a Python function") from exc
+        options = {"vector": "web_search", "persist": False}
+        for names in (("vector", "persist"), ("vector",), ("persist",), ()):
+            try:
+                signature.bind("tool", "content", **{name: options[name] for name in names})
+            except TypeError:
+                continue
+            return names
+        raise ValueError("stage_tool_fn must accept tool_name and content, optionally vector/persist keywords")
 
     def new_session(self, principal: Principal) -> str:
         if self._new_session_fn is not None:
@@ -103,19 +122,14 @@ class CallableAdapter(TargetAdapter):
                             persist: bool = False) -> None:
         if self._stage_tool_fn is None:
             return
-        # graceful fallback chain: a wired callable may predate the persist/vector
-        # kwargs (e.g. this project's own test fixtures) -- never break those.
-        try:
-            self._stage_tool_fn(tool_name, content, vector=vector, persist=persist)
-        except TypeError:
-            try:
-                self._stage_tool_fn(tool_name, content, vector=vector)
-            except TypeError:
-                self._stage_tool_fn(tool_name, content)
+        options = {"vector": vector, "persist": persist}
+        self._stage_tool_fn(tool_name, content,
+                            **{name: options[name] for name in self._stage_keyword_names})
 
     def unstage_tool_response(self, tool_name: str) -> None:
-        if self._unstage_tool_fn is not None:
-            self._unstage_tool_fn(tool_name)
+        if self._unstage_tool_fn is None:
+            raise RuntimeError("callable tool staging requires an unstage_tool_fn for rollback")
+        self._unstage_tool_fn(tool_name)
 
     def ingest_document(self, principal: Principal, session_id: str, document_text: str) -> str:
         if self._ingest_fn is not None:
@@ -129,7 +143,7 @@ class CallableAdapter(TargetAdapter):
             supports_inspect_memory=self._inspect_fn is not None,
             supports_ground_truth=self._ground_truth_fn is not None,
             supports_reset=self._reset_fn is not None,
-            supports_tool_staging=self._stage_tool_fn is not None,
+            supports_tool_staging=self._stage_tool_fn is not None and self._unstage_tool_fn is not None,
             supports_document_ingestion=self._ingest_fn is not None,
             supports_memory_layers=self._inspect_layers_fn is not None,
             supported_tool_vectors=list(self._supported_tool_vectors),

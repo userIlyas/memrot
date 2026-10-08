@@ -68,47 +68,55 @@ def audit_then_attack(audit_json_path: Optional[str], target: TargetBinding, cha
                       adaptive_max_rounds: int = 3,
                       min_severity: Optional[str] = None) -> RunReport:
     """Load the chosen pool → optional ranked audit prioritization →
-    ``run_matrix`` (or ``run_adaptive``) → ``RunReport``."""
+    ``run_matrix`` (or ``run_adaptive``) → ``RunReport``.
+
+    Internally created adapters are closed on every exit, including setup
+    errors. A supplied adapter/tracer remains owned by its caller."""
     resolved = resolve_pool(pool, audit_json_path)
     variants = StaticCatalogGenerator(resolved).generate()
-    limitations: List[str] = []
-    limitations.extend(ensure_placeholder_credentials(channels))
-    if pool in ("", "auto"):
-        if resolved == [ALL_CATALOG]:
-            limitations.append("pool=auto: audit profile looks like the invest stand; loaded generic + domain overlay")
-        else:
-            limitations.append("pool=auto: using the generic catalog (no invest-stand overlay)")
-    if audit_json_path:
-        variants, audit_limitations = select_variants_by_audit(
-            variants, audit_json_path, mode="ranked", min_severity=min_severity, top_n=top_n,
-        )
-        limitations.extend(audit_limitations)
-    elif top_n is not None:
-        variants = variants[: max(0, int(top_n))]
-
     bound = adapter if adapter is not None else build_adapter(target)
-    det = detector if detector is not None else build_detector("literal", {})
-    own_tracer = tracer is None
-    tr = tracer if tracer is not None else JSONLTracer()
     try:
-        if adaptive:
-            if attacker_llm is None:
-                raise ValueError("adaptive mode requires attacker_llm")
-            results = []
-            run_id = default_run_id()
-            for seed in variants:
-                results.extend(run_adaptive(
-                    seed, channels, bound, det, tr, run_id,
-                    attacker_llm=attacker_llm, max_rounds=adaptive_max_rounds,
-                ))
-            report = RunReport(run_id=run_id, target_id=bound.kind, results=results,
-                               channels=list(channels), limitations=limitations, trace_path=tr.path)
-            aggregate(report)
-        else:
-            report = run_matrix(variants, channels, bound, det, tr,
-                                reset_between_variants=reset_between_variants)
-            report.limitations = limitations + report.limitations
+        limitations: List[str] = []
+        if bound.kind != "mcp_client":
+            limitations.extend(ensure_placeholder_credentials(channels))
+        if pool in ("", "auto"):
+            if resolved == [ALL_CATALOG]:
+                limitations.append("pool=auto: audit profile looks like the invest stand; loaded generic + domain overlay")
+            else:
+                limitations.append("pool=auto: using the generic catalog (no invest-stand overlay)")
+        if audit_json_path:
+            variants, audit_limitations = select_variants_by_audit(
+                variants, audit_json_path, mode="ranked", min_severity=min_severity, top_n=top_n,
+            )
+            limitations.extend(audit_limitations)
+        elif top_n is not None:
+            variants = variants[: max(0, int(top_n))]
+
+        det = detector if detector is not None else build_detector("literal", {})
+        own_tracer = tracer is None
+        tr = tracer if tracer is not None else JSONLTracer()
+        try:
+            if adaptive:
+                if attacker_llm is None:
+                    raise ValueError("adaptive mode requires attacker_llm")
+                results = []
+                run_id = default_run_id()
+                for seed in variants:
+                    results.extend(run_adaptive(
+                        seed, channels, bound, det, tr, run_id,
+                        attacker_llm=attacker_llm, max_rounds=adaptive_max_rounds,
+                    ))
+                report = RunReport(run_id=run_id, target_id=bound.kind, results=results,
+                                   channels=list(channels), limitations=limitations, trace_path=tr.path)
+                aggregate(report)
+            else:
+                report = run_matrix(variants, channels, bound, det, tr,
+                                    reset_between_variants=reset_between_variants)
+                report.limitations = limitations + report.limitations
+        finally:
+            if own_tracer:
+                tr.close()
+        return report
     finally:
-        if own_tracer:
-            tr.close()
-    return report
+        if adapter is None:
+            bound.close()

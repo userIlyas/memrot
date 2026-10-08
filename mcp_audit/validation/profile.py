@@ -31,8 +31,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
-SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                           "schemas", "profile.schema.json")
+from memrot_data import data_path
+
+SCHEMA_PATH = data_path("schemas", "profile.schema.json")
 
 FACT_GROUPS = ("flows", "auth_transitions", "background_jobs", "break_points", "token_validation")
 #: sections whose entries are verified against the sources

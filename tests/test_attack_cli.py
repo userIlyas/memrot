@@ -62,7 +62,8 @@ def test_validate_catalog_all_shipped_folders_clean(capsys):
     assert rc == 0
 
 
-def test_run_end_to_end_against_in_process_http_target(http_server, monkeypatch, tmp_path, write_json):
+@pytest.mark.parametrize("gate,expected_code", [(False, 0), (True, 2)])
+def test_run_end_to_end_against_in_process_http_target(http_server, monkeypatch, tmp_path, write_json, gate, expected_code):
     port = http_server.server_address[1]
     monkeypatch.setenv("MEMROT_CRED_CUS_TEST", "sk-test-cli")
     config_path = write_json("cli_run.config.json", {
@@ -73,15 +74,17 @@ def test_run_end_to_end_against_in_process_http_target(http_server, monkeypatch,
         "catalog_paths": [BENIGN],
     })
     out_dir = str(tmp_path / "out")
-    rc = main(["run", "--config", config_path, "--out", out_dir])
-    assert rc == 0
+    rc = main(["run", "--config", config_path, "--out", out_dir] + (["--gate"] if gate else []))
+    assert rc == expected_code
     assert os.path.isfile(os.path.join(out_dir, "run.json"))
     assert os.path.isfile(os.path.join(out_dir, "run.md"))
     assert os.path.isfile(os.path.join(out_dir, "trace.jsonl"))
     with open(os.path.join(out_dir, "run.json"), encoding="utf-8") as fh:
         report = json.load(fh)
     assert len(report["results"]) == 3   # 3 benign_control variants
-    assert all(r["verdict"] == "CLEAN" for r in report["results"])
+    assert all(r["verdict"] == "INCONCLUSIVE" and r["inconclusive_reason"] for r in report["results"])
+    assert report["overall_asr"]["total"] == 0
+    assert report["schema_version"] == "2.0"
 
 
 def test_run_missing_config_field_is_a_clean_error(write_json):

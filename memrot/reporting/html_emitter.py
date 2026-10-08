@@ -82,7 +82,7 @@ def _kpi_card(label: str, value: str, color: str = "#e5e7eb") -> str:
 
 def _verdict_chip(verdict: str, count: int) -> str:
     colors = {"CONFIRMED": "#dc2626", "CLEAN": "#16a34a", "INVALID": "#6b7280",
-             "ERROR": "#9333ea", "NOT_EVALUATED": "#6b7280"}
+             "INCONCLUSIVE": "#d97706", "ERROR": "#9333ea", "NOT_EVALUATED": "#6b7280"}
     color = colors.get(verdict, "#6b7280")
     return (f'<span class="chip" style="border-color:{color};color:{color}">'
            f"{_esc(verdict)}: {count}</span>")
@@ -159,14 +159,14 @@ def _top_attacks_chart(report: RunReport, variants_by_id: Dict[str, AttackVarian
 def _result_row(r: dict) -> str:
     verdict = r.get("verdict", "")
     colors = {"CONFIRMED": "#dc2626", "CLEAN": "#16a34a", "INVALID": "#6b7280",
-             "ERROR": "#9333ea", "NOT_EVALUATED": "#6b7280"}
+             "INCONCLUSIVE": "#d97706", "ERROR": "#9333ea", "NOT_EVALUATED": "#6b7280"}
     color = colors.get(verdict, "#6b7280")
     rule_ids = ", ".join(r.get("rule_ids") or []) or "—"
     return (
         '<tr class="result-row" '
         f'data-search="{_esc((r.get("variant_id","") + " " + rule_ids + " " + str(r.get("owasp_amg_category","")) + " " + str(r.get("path_state","")) + " " + str(r.get("mutation_technique",""))).lower())}">'
         f'<td>{_esc(r.get("variant_id"))}</td>'
-        f'<td><span class="chip" style="border-color:{color};color:{color}">{_esc(verdict)}</span></td>'
+        f'<td><span class="chip" style="border-color:{color};color:{color}">{_esc(verdict)}</span><div class="muted">{_esc(r.get("inconclusive_reason") or "")}</div></td>'
         f'<td>{_esc(r.get("path_state") or "—")}</td>'
         f'<td>{_esc(r.get("owasp_amg_category") or "—")}</td>'
         f'<td>{_esc(rule_ids)}</td>'
@@ -312,6 +312,7 @@ def emit_html(report: RunReport, variants: Optional[Iterable[AttackVariant]] = N
 <body>
 <div class="wrap">
   <h1>Attack run report: {_esc(report.run_id)}</h1>
+  <p class="muted">Verdict semantics: evidence-aware-v2 (report schema 2.0)</p>
   <div class="meta">Target: <code>{_esc(report.target_id)}</code> &middot; Started {started} &middot; Finished {finished}</div>
   <div class="kpi-row">{"".join(kpis)}</div>
   <div>{verdict_chips}</div>

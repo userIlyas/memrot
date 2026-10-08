@@ -3,7 +3,7 @@
 Denominator policy: only CONFIRMED and CLEAN count toward a GroupMetric's
 ``total`` (they are the two outcomes where the technique was actually
 attempted and its effect could be observed). INVALID (stale contamination),
-ERROR (adapter/transport failure) and NOT_EVALUATED (access profile not met)
+INCONCLUSIVE (insufficient observation), ERROR (adapter/transport failure) and NOT_EVALUATED (access profile not met)
 are excluded from every ratio -- but never hidden: they are always visible
 via ``counts_by_verdict``. A group with zero attempts displays "n/a (0/0)",
 never a fabricated 0% or 100%.

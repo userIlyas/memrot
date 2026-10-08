@@ -95,6 +95,9 @@ class FakeToolPoisonableApp:
     def stage_tool_response(self, tool_name: str, content: str) -> None:
         self.staged[tool_name] = content
 
+    def unstage_tool_response(self, tool_name: str) -> None:
+        self.staged.pop(tool_name, None)
+
     def send(self, principal_id: str, session_id: str, message: str) -> str:
         self.session_messages.setdefault(session_id, []).append(message)
         if "search" in message.lower() and self.staged.get("duckduckgo_search"):
@@ -161,6 +164,7 @@ def build_adapter(app, *, access_profile: str = "black_box", with_memory: bool =
         kwargs["reset_fn"] = app.reset
     if with_tool_staging:
         kwargs["stage_tool_fn"] = app.stage_tool_response
+        kwargs["unstage_tool_fn"] = app.unstage_tool_response
     if with_ingest:
         kwargs["ingest_fn"] = app.ingest
     if supported_tool_vectors is not None:

@@ -11,11 +11,10 @@ Two layers:
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Dict, List
+from memrot_data import data_path
 
-SCHEMA_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                           "schemas", "agent-security-audit-2.0.schema.json")
+SCHEMA_PATH = data_path("schemas", "agent-security-audit-2.0.schema.json")
 
 _ENUMS = {
     "claim_status": {"hypothesis", "static_supported", "runtime_supported", "contradicted", "inconclusive"},

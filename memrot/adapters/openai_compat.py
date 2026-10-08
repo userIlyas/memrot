@@ -70,15 +70,17 @@ class OpenAICompatAdapter(TargetAdapter):
         except (KeyError, IndexError, TypeError) as exc:
             raise RuntimeError(f"unexpected chat.completions response shape: {data!r}") from exc
 
-    def send(self, principal: Principal, session_id: str, message: str) -> str:
-        key = credential_for(principal)
-        body = self._build_body(session_id, message)
-        headers = {
-            "Authorization": f"Bearer {key}",
+    def _request_headers(self, principal: Principal, session_id: str) -> Dict[str, str]:
+        return {
+            "Authorization": f"Bearer {credential_for(principal)}",
             "Content-Type": "application/json",
             self.session_header: session_id,
             **self.extra_headers,
         }
+
+    def send(self, principal: Principal, session_id: str, message: str) -> str:
+        headers = self._request_headers(principal, session_id)
+        body = self._build_body(session_id, message)
         req = urllib.request.Request(
             self._endpoint(),
             data=json.dumps(body).encode("utf-8"),

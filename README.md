@@ -47,19 +47,29 @@ Every attempt gets one of five verdicts, and the ASR (Attack Success Rate)
 denominator is never fabricated: a category nobody could test displays
 `n/a (0/0)`, never a silent 0%.
 
-## Quickstart — try it in under a minute, no setup
+## Quickstart — offline, no target or API key
 
 ```bash
-git clone <this repo>
-cd aith_redteaming
-jupyter notebook examples/notebooks/memrot_quickstart.ipynb
+git clone https://github.com/userIlyas/memrot.git
+cd memrot
+git switch feature/memory-trace-v0.1
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+python -m memrot.smoke
 ```
 
-This notebook needs no Docker, no API key, and no target of your own: it
-tries a real stand at `localhost:8600` and falls back to a deterministic,
-self-contained in-memory target if none is reachable. It walks through
-audit-driven ranking, an indirect (tool-vector) injection, and the HTML
-dashboard.
+Requires Python 3.12 or newer; Linux/Python 3.12 is the primary test target.
+The smoke command uses deterministic in-memory targets, validates bundled
+schemas/catalogs, emits and validates memory traces, and exercises the report
+renderers. It makes no network requests, including localhost or Presidio.
+Expected fixture outcomes are `persistent: CONFIRMED` and `nonpersistent: CLEAN`.
+These check the harness installation, not the security of a real agent.
+
+The optional [quickstart notebook](examples/notebooks/memrot_quickstart.ipynb)
+can be run after `python -m pip install -e '.[notebook]'`. Unlike the smoke
+command, that notebook tries a stand at `localhost:8600` before falling back
+to an in-memory target.
 
 For the richer, real-target demo — real tool-poisoning, a real attacker LLM,
 an imported jailbreak bank, all against a genuinely running stand — see
@@ -69,27 +79,31 @@ exactly what).
 
 ## Installation
 
-There's no package to install — `memrot` runs straight from a clone:
+Install from the repository root in a virtual environment:
 
 ```bash
-git clone <this repo>
-cd aith_redteaming
+python -m pip install .
 python -m memrot --help
+python -m mcp_audit --help
 ```
 
-The core engine (`memrot/runner`, `memrot/adapters`, `memrot/detectors`,
-including the MCP client's streamable-HTTP and stdio transports) is **stdlib
-only** — no third-party dependency required to run an attack. A few optional
-extras unlock specific features:
+Use `python -m pip install -e '.[dev]'` for an editable development install.
+On Windows, activate the venv with `.venv\Scripts\Activate.ps1`; CI runs a
+separate Windows installation smoke check. The full offline suite targets Linux.
 
-| Package | Unlocks |
+The memory-trace runtime requires Pydantic 2, `jsonschema`, and
+`rfc3339-validator`; installation resolves these declared dependencies.
+Wheels include the schemas, profiles, lexicon, catalogs, and imported-bank
+notices, so the installed CLI works outside the checkout. Optional extras:
+
+| Extra | Unlocks |
 |---|---|
-| `tqdm` | A live progress bar in the fancy CLI (see below). Degrades to a plain percent-printed progress line without it. |
-| `pymongo`, `redis` | White-box memory reads via the `genai_invest` adapter. |
-| `python-dotenv` | `InProcessStandAdapter`'s `env_path` convenience, used by `memrot_full_demo.ipynb`. |
-| `pyyaml` | YAML run configs (JSON always works without it). |
+| `.[cli]` | `tqdm` progress bars; plain progress remains available without it. |
+| `.[stand]` | Mongo/Redis inspection and dotenv loading for separately configured target stands. |
+| `.[yaml]` | YAML configuration via PyYAML (JSON always works). |
+| `.[notebook]` | Jupyter notebooks; live demos still require their own target and credentials. |
 
-For development: `pip install pytest` and see [Development](#development).
+See [Development](#development) for the locked CI installation.
 
 ## CLI overview
 
@@ -180,7 +194,8 @@ vocabulary, never collapsed into a simple pass/fail:
 
 ```
 CONFIRMED     -- the attack reached its goal (canary/behavior observed)
-CLEAN         -- attempted, not reproduced this run (not proof of safety)
+CLEAN         -- absent in usable observations (not proof of safety)
+INCONCLUSIVE  -- insufficient observation; excluded from ASR, gate exit 2
 ERROR         -- adapter/transport failure -- never silently counted as CLEAN
 INVALID       -- canary was already present before this variant ran (stale)
 NOT_EVALUATED -- this adapter cannot exercise this variant's delivery channel
@@ -192,8 +207,9 @@ failing aborts the run before any attack turn is spent.
 
 ## Audit → Attack workflow
 
-Two tools, one shared vocabulary. [`mcp_audit`](mcp_audit/) is a separate,
-offline static-analysis engine: it reads a target's config/source/policy and
+Two tools, one shared vocabulary. [`mcp_audit`](mcp_audit/) is a separate
+auditor with offline analysis, live inventory, and controlled validation.
+In offline mode it reads a target's config/source/policy and
 produces a JSON report of findings (`rule_id`s like `MEM-02`/`AUTH-02`/
 `TOOL-04`, each with a severity and a `claim_status` that starts at
 `hypothesis`). `memrot` can consume that report to *rank* its own catalog by
@@ -201,6 +217,7 @@ what the audit actually flagged, so the highest-severity findings get
 attacked first:
 
 ```bash
+mkdir -p .audit
 python -m mcp_audit audit examples/genai_invest_stand.manifest.json --json .audit/stand.json --md .audit/stand.md
 python -m memrot run --config examples/genai_invest_stand.attack.config.json \
   --audit examples/genai_invest_stand.audit.json --audit-mode ranked --out .attack --report-html .attack/run.html
@@ -288,19 +305,39 @@ final step covers the attack side).
 
 ## Development
 
-A fresh clone has no virtualenv — create one:
+Implementation follows [the roadmap](docs/ROADMAP_memrot.md); see
+[completed work and validation](docs/roadmap-progress.md).
+
+From the repository root, create a virtualenv and install the dev extra:
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install pytest
-pytest -q
+python -m pip install -e '.[dev]'
+python -m pytest -ra
+python -m memrot.smoke
 ```
 
-`tests/test_attack_inprocess_stand_adapter.py` has two tests gated on
-whether an `app` package (from a separately-checked-out target stand) is
-importable — they report as `SKIPPED`, not failed, when it isn't. That's the
-project's own philosophy applied to its own test suite: never a silent false
-pass, degrade visibly instead.
+Default discovery includes both `tests/` and `memory_trace/tests/`.
+Four in-process adapter tests and one portability test require the separate
+`genai-invest-agent-memory-stand` repository and skip when it is absent.
+The rest of the suite uses local fixtures; some tests start loopback HTTP or
+stdio servers. No live stand or cloud model is required.
+
+CI pins development and build dependencies (including transitive dependencies)
+with hashes. To reproduce that dependency set in a fresh venv:
+
+```bash
+python -m pip install --require-hashes -r requirements-dev.lock
+python -m pip install --no-deps --no-build-isolation -e '.[dev]'
+python -m pytest -ra
+python -m build --no-isolation
+```
+
+The installation tests build a wheel and run both CLIs and the offline smoke
+outside the checkout. CI additionally builds a wheel from the sdist and checks
+it in a clean virtualenv with only declared runtime dependencies.
+Regenerate the lock deliberately after dependency changes using
+`uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 --generate-hashes --output-file requirements-dev.lock --no-annotate`.
 
 ## Repository layout
 

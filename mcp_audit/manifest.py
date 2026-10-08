@@ -159,11 +159,13 @@ def load_profile(ref: Optional[str], base_dir: str = ".") -> Dict[str, Any]:
     path = ref if os.path.isabs(ref) else os.path.join(base_dir, ref)
     if not os.path.isfile(path):
         # allow bare profile ids resolved from the bundled profiles/ directory
-        here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        for cand in (os.path.join(here, "profiles", ref), os.path.join(here, "profiles", ref + ".json")):
-            if os.path.isfile(cand):
-                path = cand
+        from memrot_data import data_path
+        for name in (ref, ref + ".json"):
+            try:
+                path = str(data_path("profiles", name))
                 break
+            except FileNotFoundError:
+                continue
         else:
             raise FileNotFoundError(f"profile not found: {ref}")
     data = _load_any(path)

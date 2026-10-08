@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling==1.32.4", "editables==0.5"]
+build-backend = "hatchling.build"
+
+[project]
+name = "memrot"
+version = "0.1.0"
+description = "Multi-step audit and attack harness for AI-agent memory and tools"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.13.5,<3",
+    "jsonschema>=4.26,<5",
+    "rfc3339-validator>=0.1.4,<0.2",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9,<10", "build>=1.2,<2", "hatchling==1.32.4", "editables==0.5", "PyYAML>=6,<7"]
+yaml = ["PyYAML>=6,<7"]
+cli = ["tqdm>=4.66,<5"]
+stand = ["pymongo>=4,<5", "redis>=5,<8", "python-dotenv>=1,<2"]
+notebook = ["notebook>=7,<8"]
+
+[project.scripts]
+memrot = "memrot.cli:main"
+mcp-audit = "mcp_audit.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["memrot", "mcp_audit", "memory_trace", "memrot_data"]
+exclude = ["memory_trace/tests"]
+
+# Keep the public schema/profile source paths while giving installed wheels
+# their own namespace, rather than writing generic site-packages/schemas/.
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "memrot_data/schemas"
+"profiles" = "memrot_data/profiles"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/memrot", "/mcp_audit", "/memory_trace", "/memrot_data",
+    "/schemas", "/profiles", "/tests", "/examples", "/docs",
+    "/README.md", "/pyproject.toml", "/pytest.ini", "/requirements-dev.lock",
+]

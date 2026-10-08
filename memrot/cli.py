@@ -4,7 +4,7 @@ Exit codes (mirrors mcp_audit's convention):
 
     0  run completed; no CONFIRMED verdicts (or --gate not set)
     1  at least one CONFIRMED verdict                                [only with --gate]
-    2  no CONFIRMED, but NOT_EVALUATED/INVALID/ERROR present (incomplete coverage)  [only with --gate]
+    2  no CONFIRMED, but NOT_EVALUATED/INVALID/ERROR/INCONCLUSIVE present (incomplete coverage)  [only with --gate]
     4  config/adapter/catalog fatal error before any variant could run
 
 (3 is reserved for a future phase-2 ASR-regression gate; unused in phase 1.)
@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 import sys
+from contextlib import ExitStack
 from typing import List, Optional
 
 from . import ATTACK_ENGINE_VERSION, ATTACK_SCHEMA_VERSION, MEMROT_TAGLINE, MEMROT_VERSION, taxonomy, ui
@@ -107,6 +108,13 @@ def _vulnerable_descriptions(rows) -> List[str]:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    # Keep ownership around the entire command, including health checks,
+    # generation, reporting, early returns and interrupts.
+    with ExitStack() as cleanup:
+        return _cmd_run(args, cleanup)
+
+
+def _cmd_run(args: argparse.Namespace, cleanup: ExitStack) -> int:
     fancy = ui.fancy_enabled(getattr(args, "no_fancy", False), getattr(args, "fancy", False))
     if fancy:
         ui.print_banner(MEMROT_VERSION, MEMROT_TAGLINE)
@@ -143,6 +151,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         # Adapter/detector construction is pure object setup, no network I/O --
         # safe to do before the (real, costly) mutation step below.
         adapter = build_adapter(config.target)
+        cleanup.callback(adapter.close)
 
         detector_kind = config.detector.kind
         detector_options = dict(config.detector.options)
@@ -390,7 +399,7 @@ def _exit_code(counts, gate: bool) -> int:
         return EXIT_OK
     if counts.get(Verdict.CONFIRMED.value):
         return EXIT_CONFIRMED
-    if counts.get(Verdict.NOT_EVALUATED.value) or counts.get(Verdict.INVALID.value) or counts.get(Verdict.ERROR.value):
+    if counts.get(Verdict.NOT_EVALUATED.value) or counts.get(Verdict.INVALID.value) or counts.get(Verdict.ERROR.value) or counts.get(Verdict.INCONCLUSIVE.value):
         return EXIT_INCOMPLETE
     return EXIT_OK
 
@@ -444,7 +453,13 @@ def cmd_quickstart(args: argparse.Namespace) -> int:
     if args.cred_victim_env and os.environ.get(args.cred_victim_env):
         os.environ[f"MEMROT_CRED_{victim_ref}"] = os.environ[args.cred_victim_env]
 
-    target = TargetBinding(kind=args.adapter, binding={"base_url": args.url, "model": args.model})
+    binding = {"base_url": args.url}
+    if args.adapter == "mcp_client":
+        if args.chat_tool:
+            binding["chat_tool"] = args.chat_tool
+    else:
+        binding["model"] = args.model
+    target = TargetBinding(kind=args.adapter, binding=binding)
     channels = [
         Channel(role=ChannelRole.ATTACKER, principal=Principal(principal_id=args.attacker_principal,
                                                                credential_ref=attacker_ref)),
@@ -547,6 +562,7 @@ def build_parser() -> argparse.ArgumentParser:
     pq = sub.add_parser("quickstart", help="run against any OpenAI-compatible agent without a config file")
     pq.add_argument("--url", required=False, help="target base URL (e.g. http://localhost:8600/v1)")
     pq.add_argument("--model", default="default", help="model / agent name")
+    pq.add_argument("--chat-tool", help="explicit MCP tool binding (with --adapter mcp_client)")
     pq.add_argument("--adapter", default="openai_compat",
                     choices=["openai_compat", "genai_invest", "mcp_client", "http_generic"])
     pq.add_argument("--attacker-principal", default="A")

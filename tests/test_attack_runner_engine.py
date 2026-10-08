@@ -30,7 +30,7 @@ def test_confirmed_flow_cross_user_policy_poisoning():
     result = run_variant(_mem02_style_variant(), CHANNELS, adapter, LiteralDetector(), JSONLTracer(), "run1")
     assert result.verdict == Verdict.CONFIRMED
     assert result.rule_ids == ["MEM-02"]
-    assert result.path_state == "control_violation_observed"
+    assert result.path_state == "runtime_path_observed"
     assert result.evidence_tier == "text"        # black-box adapter: reply text is the only channel
     assert result.chain_break_reason is None
 
@@ -40,7 +40,7 @@ def test_clean_flow_no_leak():
     adapter = build_adapter(app)
     result = run_variant(_mem02_style_variant(), CHANNELS, adapter, LiteralDetector(), JSONLTracer(), "run1")
     assert result.verdict == Verdict.CLEAN
-    assert result.path_state == "static_path_supported"
+    assert result.path_state == "unknown"
     assert result.evidence_tier == "none"
     assert result.chain_break_reason is None     # no memory-layer channel: never a guessed diagnosis
 

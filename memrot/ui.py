@@ -11,7 +11,7 @@ same "graceful degrade, never a hard requirement" pattern already used for
 Visual reference: LLAMATOR's CLI output (boxed banner/config/legend, a
 results table with a Confirmed/Clean/Errors/Strength-bar breakdown, a
 plain-language summary). Adapted for this project's own verdict vocabulary
-(``CONFIRMED``/``CLEAN``/``ERROR``/``INVALID``/``NOT_EVALUATED`` -- never
+(``CONFIRMED``/``CLEAN``/``INCONCLUSIVE``/``ERROR``/``INVALID``/``NOT_EVALUATED`` -- never
 collapsed into just "broken/resilient", see ``models.py``'s own "never
 fabricate a percentage" rule) and its own two-phase flow: an audit summary
 is shown *before* the attack table when ``--audit`` is used, because this
@@ -204,16 +204,16 @@ def _strength_bar(confirmed: int, total: int, bar_width: int = 14) -> str:
 def print_results_table(rows: Sequence[Tuple[str, int, int, int]], total_row: Tuple[str, int, int, int],
                         category_width: int = 30) -> None:
     """``rows``/``total_row`` are (label, confirmed, clean, excluded) tuples,
-    ``excluded`` being ERROR+INVALID+NOT_EVALUATED combined (always shown,
+    ``excluded`` being ERROR+INVALID+NOT_EVALUATED+INCONCLUSIVE combined (always shown,
     per this project's "never hide a non-CONFIRMED/CLEAN verdict" rule --
     just not folded into the ASR ratio itself, see ``models.py``). Column
     widths are computed from the actual content (headers included) rather
     than hardcoded, since the ASR bar's rendered width varies with the
     numbers involved."""
-    headers = ("", "Category", "Confirmed", "Clean", "Err/Inv/N-E", "ASR (attack strength)")
+    headers = ("", "Category", "Confirmed", "Clean", "Excluded", "ASR (attack strength)")
 
     def build(label, confirmed, clean, excluded):
-        mark = "✘" if confirmed > 0 else "✔"
+        mark = "✘" if confirmed > 0 else "?" if excluded > 0 else "✔"
         asr = _strength_bar(confirmed, confirmed + clean)
         return [mark, _clip(label, category_width), str(confirmed), str(clean), str(excluded), asr]
 

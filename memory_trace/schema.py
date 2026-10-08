@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, List
 
 import jsonschema
 from jsonschema.exceptions import ValidationError, best_match
+from memrot_data import data_path
 
-SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "memory-trace-0.1.schema.json"
+SCHEMA_PATH = data_path("schemas", "memory-trace-0.1.schema.json")
 
 
 class SchemaValidationError(ValueError):

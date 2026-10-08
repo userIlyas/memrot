@@ -30,9 +30,9 @@ def test_verdict_values_are_plain_strings_via_plain():
 
 
 def test_path_state_for_matches_audit_ladder():
-    assert path_state_for(Verdict.CONFIRMED, "cross-user") == "control_violation_observed"
-    assert path_state_for(Verdict.CONFIRMED, "single-turn") == "runtime_path_observed"
-    assert path_state_for(Verdict.CLEAN, "cross-user") == "static_path_supported"
+    assert path_state_for(Verdict.CONFIRMED, "cross-user") == "unknown"
+    assert path_state_for(Verdict.CONFIRMED, "single-turn") == "unknown"
+    assert path_state_for(Verdict.CLEAN, "cross-user") == "unknown"
     assert path_state_for(Verdict.ERROR) == "unknown"
     assert path_state_for(Verdict.NOT_EVALUATED) == "unknown"
     assert path_state_for(Verdict.INVALID) == "unknown"

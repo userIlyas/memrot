@@ -17,7 +17,7 @@ class LiteralDetector(Detector):
 
     def detect(self, text: Optional[str], canary: str, channel: DetectionChannel) -> DetectionResult:
         if text is None or not canary:
-            return DetectionResult(canary_present=False, channel=channel, detail="no text to inspect")
+            return DetectionResult(canary_present=False, channel=channel, detail="no text to inspect", observed=False)
         haystack, needle = (text, canary) if self.case_sensitive else (text.lower(), canary.lower())
         present = needle in haystack
         return DetectionResult(canary_present=present, channel=channel,

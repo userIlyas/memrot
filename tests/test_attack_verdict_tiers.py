@@ -56,7 +56,7 @@ def test_evidence_tier_is_the_strongest_channel_that_saw_the_canary():
 
 
 def test_strict_rejects_cross_principal_text_only_confirmation():
-    assert apply_tier_gate(Verdict.CONFIRMED, "text", cross_principal=True, strict=True) is Verdict.CLEAN
+    assert apply_tier_gate(Verdict.CONFIRMED, "text", cross_principal=True, strict=True) is Verdict.INCONCLUSIVE
 
 
 @pytest.mark.parametrize("tier, cross, strict", [
@@ -104,11 +104,13 @@ def test_no_chain_break_without_evidence(layers, expected_layer, report):
 # Engine integration
 # --------------------------------------------------------------------------- #
 
-def test_engine_strict_turns_cross_user_text_only_into_clean(monkeypatch):
+def test_engine_strict_turns_cross_user_text_only_into_inconclusive(monkeypatch):
     monkeypatch.setenv("MEMROT_TIER_STRICT", "1")
     result = run_variant(_variant(), CHANNELS, build_adapter(FakeVulnerableMemoryApp()),
                          LiteralDetector(), JSONLTracer(), "run1")
-    assert result.verdict == Verdict.CLEAN
+    assert result.verdict == Verdict.INCONCLUSIVE
+    assert result.post_detection.canary_present is True
+    assert result.inconclusive_reason
     assert result.evidence_tier == "text"
     assert any("MEMROT_TIER_STRICT" in note for note in result.limitations)
 

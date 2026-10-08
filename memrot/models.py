@@ -68,6 +68,7 @@ class ChannelRole(str, enum.Enum):
 class Verdict(str, enum.Enum):
     CONFIRMED = "CONFIRMED"       # canary absent before, present after: the technique poked through
     CLEAN = "CLEAN"                 # canary absent before and after: not reproduced (or not vulnerable)
+    INCONCLUSIVE = "INCONCLUSIVE"    # observation insufficient to decide
     INVALID = "INVALID"              # canary already present before the attack ran: stale contamination
     ERROR = "ERROR"                   # adapter/transport failure
     NOT_EVALUATED = "NOT_EVALUATED"    # required access profile not met by the bound adapter
@@ -81,20 +82,17 @@ PATH_STATE_STATIC_SUPPORTED = "static_path_supported"
 PATH_STATE_UNKNOWN = "unknown"
 
 
-def path_state_for(verdict: Verdict, propagation: str = "") -> str:
-    """Map a harness verdict onto the auditor's path_state vocabulary.
+def path_state_for(verdict: Verdict, propagation: str = "", *,
+                   evidence_refs: Optional[List[Dict[str, str]]] = None) -> str:
+    """Derive path support only from explicit evidence, never verdict/labels.
 
-    CONFIRMED + cross-user  -> control_violation_observed (payoff reached another principal)
-    CONFIRMED otherwise     -> runtime_path_observed (payload persisted / surfaced)
-    CLEAN                   -> static_path_supported (attempted, not reproduced this run)
-    INVALID/ERROR/NOT_EVALUATED -> unknown (do not pretend a static path was confirmed)
+    References identify observations in the serialized result or an external
+    evidence artifact. A backend access alone is not a policy violation.
     """
-    if verdict is Verdict.CONFIRMED:
-        if propagation == "cross-user":
-            return PATH_STATE_CONTROL_VIOLATION
-        return PATH_STATE_RUNTIME_OBSERVED
-    if verdict is Verdict.CLEAN:
-        return PATH_STATE_STATIC_SUPPORTED
+    supported = {ref.get("kind") for ref in evidence_refs or [] if ref.get("ref")}
+    for kind in (PATH_STATE_CONTROL_VIOLATION, PATH_STATE_RUNTIME_OBSERVED, PATH_STATE_STATIC_SUPPORTED):
+        if kind in supported:
+            return kind
     return PATH_STATE_UNKNOWN
 
 
@@ -228,6 +226,7 @@ class DetectionResult:
     channel: DetectionChannel
     detail: str = ""
     evidence_ref: Optional[str] = None   # trace event_id
+    observed: bool = True              # False means unavailable, not a negative observation
 
     def to_dict(self) -> Dict[str, Any]:
         return plain({f.name: getattr(self, f.name) for f in fields(self)})
@@ -281,6 +280,10 @@ class AttackResult:
     path_state: str = ""  # mcp_audit PathState string; set by the engine from verdict + propagation
     evidence_tier: EvidenceTier = "none"          # strongest channel that saw the canary, see EVIDENCE_TIER_ORDER
     chain_break_reason: Optional[str] = None      # CLEAN only: one of CHAIN_BREAK_VALUES, None = not diagnosed
+    cleanup_error: Optional[str] = None          # tool rollback failure, kept separate from the primary error
+    inconclusive_reason: Optional[str] = None
+    state_detection: Optional[DetectionResult] = None
+    evidence_refs: List[Dict[str, str]] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         return plain({f.name: getattr(self, f.name) for f in fields(self)})
@@ -338,6 +341,8 @@ class RunReport:
 
     def to_dict(self) -> Dict[str, Any]:
         return {
+            "schema_version": "2.0",
+            "verdict_semantics": "evidence-aware-v2",
             "run_id": self.run_id,
             "target_id": self.target_id,
             "started_at": self.started_at,

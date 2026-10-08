@@ -51,11 +51,27 @@ class AdapterCapabilities:
     supports_memory_layers: bool = False     # inspect_memory_layers() is implemented
     supported_tool_vectors: List[str] = field(default_factory=list)
     notes: List[str] = field(default_factory=list)
+    # Existing adapters accept a principal on every call. Fixed-identity
+    # transports must opt out; this does not attest backend authorization.
+    supports_principal_switch: bool = True
 
 
 class TargetAdapter(abc.ABC):
     kind: str = "abstract"
     adapter_version: str = "0.1.0"
+    # Set by the runner if staged content could not be removed. This adapter
+    # must not run further attempts against potentially contaminated state.
+    tool_staging_cleanup_error: Optional[str] = None
+
+    def close(self) -> None:
+        """Release owned resources; implementations must allow repeated calls."""
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.close()
 
     @abc.abstractmethod
     def new_session(self, principal: Principal) -> str:
@@ -91,10 +107,20 @@ class TargetAdapter(abc.ABC):
         ``None`` when the target does not report it."""
         return None
 
+    def ground_truth_mark(self, *, run_id: str, attempt_id: str, principal: Principal,
+                          session_id: str, target_ref: Optional[str]) -> Any:
+        """Capture an opaque evidence cursor immediately before the observed action.
+
+        The runner passes a non-None cursor back as ``window`` to ground_truth_check.
+        Existing providers can keep their own observation mechanism.
+        """
+        return None
+
     def ground_truth_check(self, marker: str, **kwargs: Any) -> Optional[bool]:
         """An objective, out-of-band signal independent of what the model
         *said* -- e.g. a backend access log grep. Returns ``None`` when this
-        channel is not available."""
+        channel is unavailable or insufficiently correlated. Source failures
+        must raise; absence of a matching event alone does not prove False."""
         return None
 
     def reset(self) -> bool:
@@ -131,11 +157,12 @@ class TargetAdapter(abc.ABC):
     def unstage_tool_response(self, tool_name: str) -> None:
         """Clear any staged response for ``tool_name`` regardless of how it
         was staged (one-shot or ``persist=True``). The engine calls this
-        unconditionally right after the trigger turn of a tool-injection
-        flow, so a ``persist=True`` stage never leaks into a later phase
+        in a finally block after staging/trigger, including partial staging
+        failures, so a ``persist=True`` stage never leaks into a later phase
         (consolidate, probe) of the same variant run. No-op default -- safe
         for adapters that already auto-clear (the one-shot default) or that
-        don't support staging at all."""
+        don't support staging at all. Adapters advertising tool staging must
+        implement an idempotent cleanup, including after a partial stage."""
         return None
 
     def ingest_document(self, principal: Principal, session_id: str, document_text: str) -> str:

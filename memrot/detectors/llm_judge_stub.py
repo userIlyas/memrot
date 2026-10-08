@@ -71,7 +71,7 @@ class LLMJudgeDetector(Detector):
 
     def detect(self, text: Optional[str], canary: str, channel: DetectionChannel) -> DetectionResult:
         if text is None or not canary:
-            return DetectionResult(canary_present=False, channel=channel, detail="no text to inspect")
+            return DetectionResult(canary_present=False, channel=channel, detail="no text to inspect", observed=False)
         try:
             raw = self.llm.complete(system=_JUDGE_SYSTEM_PROMPT, user=_judge_user_prompt(text, canary),
                                     temperature=self.temperature, max_tokens=10)

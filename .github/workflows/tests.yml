@@ -1,0 +1,59 @@
+name: Offline tests and installation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.lock
+      - name: Install locked development dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --no-deps --no-build-isolation -e '.[dev]'
+      - name: Run both test trees
+        run: python -m pytest -ra
+      - name: Validate catalog taxonomy
+        run: python -m memrot validate-catalog memrot/catalog/prompts --strict-taxonomy
+      - name: Build sdist and wheel from sdist
+        run: python -m build --no-isolation
+      - name: Check wheel with only declared runtime dependencies
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/memrot-wheel"
+          wheel_python="$RUNNER_TEMP/memrot-wheel/bin/python"
+          "$wheel_python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$wheel_python" -I -m memrot --help
+          "$wheel_python" -I -m mcp_audit --help
+          "$wheel_python" -I -m memrot.smoke
+
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install and run outside checkout
+        shell: pwsh
+        run: |
+          python -m pip install .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Set-Location $env:RUNNER_TEMP
+          python -I -m memrot --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I -m mcp_audit --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -I -m memrot.smoke
+          exit $LASTEXITCODE

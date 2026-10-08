@@ -33,7 +33,7 @@ def run_adaptive(seed: AttackVariant, channels: List[Channel], adapter: TargetAd
                  ) -> List[AttackResult]:
     """Iterate: run the variant; if not CONFIRMED, ask attacker_llm for a
     better payload from the previous probe/trigger response; repeat until
-    CONFIRMED or ``max_rounds``. Adapter ERROR aborts the remaining rounds
+    CONFIRMED or ``max_rounds``. Adapter ERROR/NOT_EVALUATED aborts the remaining rounds
     (the ERROR result is kept). ``technique_slugs`` is accepted for the
     public contract; the rewrite itself is a single attacker-LLM call."""
     del technique_slugs  # contract surface; rewrite is a single attacker-LLM call
@@ -50,7 +50,7 @@ def run_adaptive(seed: AttackVariant, channels: List[Channel], adapter: TargetAd
         results.append(result)
         if result.verdict == Verdict.CONFIRMED:
             break
-        if result.verdict == Verdict.ERROR:
+        if result.verdict in (Verdict.ERROR, Verdict.NOT_EVALUATED):
             break
         if round_idx == max_rounds:
             break

@@ -29,6 +29,7 @@ def emit_markdown(report: RunReport) -> str:
     L = []
     L.append(f"# Attack run report: {report.run_id}")
     L.append("")
+    L.append("- Verdict semantics: evidence-aware-v2 (report schema 2.0)")
     L.append(f"- Target: `{esc(report.target_id)}`")
     L.append(f"- Channels: {', '.join(esc(c.channel_id) for c in report.channels)}")
     L.append(f"- Verdict counts: {esc(dict(report.counts_by_verdict))}")
@@ -46,6 +47,10 @@ def emit_markdown(report: RunReport) -> str:
                  f"{esc(r.framing)} | {esc(r.payload)} | {esc(r.layer)} | {esc(r.propagation)} |")
     L.append("")
 
+    for r in report.results:
+        if r.inconclusive_reason:
+            L.append(f"- {esc(r.variant_id)}: INCONCLUSIVE — {esc(r.inconclusive_reason)}")
+    L.append("")
     L.append("## ASR by rule id")
     L.append("")
     L.append("| Rule ID | ASR |")
