@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
-from ..models import (DELIVERY_CHANNEL_VALUES, DOMAIN_VALUES, FRAMING_VALUES, LAYER_VALUES,
+from ..models import (CASE_KIND_VALUES, DELIVERY_CHANNEL_VALUES, DOMAIN_VALUES, FRAMING_VALUES, LAYER_VALUES,
                      PAYLOAD_VALUES, PROPAGATION_VALUES, THREAT_MODEL_VALUES, TOOL_VECTOR_VALUES)
 from ..taxonomy import ATTACK_TECHNIQUE_CATEGORY_SLUGS, OWASP_AMG_CATEGORY_SLUGS
 
@@ -43,6 +43,11 @@ def validate_variant_dict(d: Dict[str, Any], where: str = "", *,
         if v is not None and v not in allowed:
             errors.append(f"{tag}{field_name}={v!r} not in {sorted(allowed)}")
 
+    check_enum("case_kind", set(CASE_KIND_VALUES))
+    if d.get("expected_response") is not None and (not isinstance(d["expected_response"], str) or not d["expected_response"].strip()):
+        errors.append(f"{tag}expected_response must be a non-empty string")
+    if d.get("case_kind") == "benign_control" and (d.get("propagation") != "single-turn" or d.get("delivery_channel", "chat_direct") != "chat_direct"):
+        errors.append(f"{tag}benign_control requires single-turn chat_direct")
     check_enum("framing", ALLOWED_FRAMING)
     check_enum("payload", ALLOWED_PAYLOAD)
     check_enum("layer", ALLOWED_LAYER)
@@ -111,7 +116,7 @@ def validate_variant_dict(d: Dict[str, Any], where: str = "", *,
     if not isinstance(d.get("taxonomy", []), list):
         errors.append(f"{tag}taxonomy must be a list")
 
-    if require_taxonomy and not _is_benign_control(d):
+    if require_taxonomy and d.get("case_kind", "attack") == "attack" and not _is_benign_control(d):
         threat_model = d.get("threat_model", "memory_poisoning")
         if threat_model == "memory_poisoning" and not (d.get("owasp_amg_category") or ""):
             errors.append(f"{tag}memory_poisoning variant must carry owasp_amg_category")

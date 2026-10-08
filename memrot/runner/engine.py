@@ -80,6 +80,7 @@ def _tagged(variant: AttackVariant, **kwargs) -> AttackResult:
     on AttackVariant cannot be silently dropped from AttackResult."""
     base = dict(
         variant_id=variant.id,
+        case_kind=variant.case_kind,
         rule_ids=list(variant.rule_ids),
         taxonomy=list(variant.taxonomy),
         owasp_amg_category=variant.owasp_amg_category,
@@ -234,6 +235,10 @@ def _run_variant(variant: AttackVariant, channels: List[Channel], adapter: Targe
                        limitations=["adapter does not support ingest_document(); this "
                                     "delivery_channel='document_ingestion' variant cannot be evaluated against this target"])
     try:
+        if variant.case_kind == "benign_control":
+            if not any(c.role.value == "benign_control" for c in channels):
+                return _tagged(variant, verdict=Verdict.NOT_EVALUATED, limitations=["benign_control channel not configured"])
+            return _run_benign_control(variant, channels, adapter, detector, tracer, run_id)
         if variant.delivery_channel == "tool_result":
             return _run_tool_injection_flow(variant, channels, adapter, caps, detector, tracer, run_id)
         if variant.delivery_channel == "document_ingestion":
@@ -244,6 +249,26 @@ def _run_variant(variant: AttackVariant, channels: List[Channel], adapter: Targe
     except Exception as exc:  # noqa: BLE001 -- an adapter/transport failure must surface as ERROR, never crash the matrix
         tracer.log(run_id=run_id, trace_id=variant.id, phase="error", error=f"{type(exc).__name__}: {exc}")
         return _tagged(variant, verdict=Verdict.ERROR, error=f"{type(exc).__name__}: {exc}")
+
+
+def _run_benign_control(variant, channels, adapter, detector, tracer, run_id):
+    channel = _pick_channel(channels, "benign_control", variant.attacker_principal)
+    session = adapter.new_session(channel.principal)
+    response = adapter.send(channel.principal, session, variant.probe)
+    received = isinstance(response, str) and bool(response.strip())
+    utility = (variant.expected_response in response if received else None) if variant.expected_response else None
+    marker = variant.canary_template or variant.target_ref or ""
+    detection = detector.detect(response, marker, DetectionChannel.RESPONSE_TEXT) if marker.strip() and received else None
+    false_positive = detection.canary_present if detection is not None and detection.observed else None
+    # A control's CONFIRMED signal is a detector false positive, not an attack.
+    verdict = (Verdict.CONFIRMED if false_positive else Verdict.CLEAN
+               if false_positive is False or utility is not None else Verdict.INCONCLUSIVE)
+    limitations = [] if verdict is not Verdict.INCONCLUSIVE else ["control has no usable utility or false-positive oracle"]
+    tracer.log(run_id=run_id, trace_id=variant.id, phase="control", session_id=session,
+               principal=channel.principal.principal_id, direction="response", text=response)
+    return _tagged(variant, verdict=verdict, post_detection=detection,
+                   channels_used=[channel.channel_id], control_response_received=received,
+                   control_utility=utility, control_false_positive=false_positive, limitations=limitations)
 
 
 def _mark_ground_truth(adapter, variant, principal, session_id, run_id):
@@ -658,6 +683,6 @@ def run_matrix(variants: List[AttackVariant], channels: List[Channel], adapter: 
             progress_hook(i, total, variant, result)
 
     report = RunReport(run_id=run_id, target_id=adapter.kind, results=results, channels=list(channels),
-                       limitations=limitations, trace_path=tracer.path)
+                       limitations=limitations, trace_path=tracer.path, selected_variants=list(variants))
     aggregate(report)
     return report

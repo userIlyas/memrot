@@ -84,7 +84,7 @@ def test_inconclusive_excluded_from_metrics_visible_in_all_formats():
         assert "INCONCLUSIVE" in rendered and "missing evidence" in rendered
     assert "missing evidence &lt;unsafe&gt;" in emit_html(report)
     decoded = load_json_report(emit_json(report))
-    assert decoded["schema_version"] == "2.0"
+    assert decoded["schema_version"] == "2.1"
     assert decoded["results"][0]["inconclusive_reason"] == "missing evidence <unsafe>"
 
 

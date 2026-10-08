@@ -100,14 +100,17 @@ def audit_then_attack(audit_json_path: Optional[str], target: TargetBinding, cha
                 if attacker_llm is None:
                     raise ValueError("adaptive mode requires attacker_llm")
                 results = []
+                selected_inventory = list(variants)
                 run_id = default_run_id()
                 for seed in variants:
                     results.extend(run_adaptive(
                         seed, channels, bound, det, tr, run_id,
                         attacker_llm=attacker_llm, max_rounds=adaptive_max_rounds,
+                        selected_inventory=selected_inventory,
                     ))
                 report = RunReport(run_id=run_id, target_id=bound.kind, results=results,
-                                   channels=list(channels), limitations=limitations, trace_path=tr.path)
+                                   channels=list(channels), limitations=limitations, trace_path=tr.path,
+                                   selected_variants=selected_inventory)
                 aggregate(report)
             else:
                 report = run_matrix(variants, channels, bound, det, tr,

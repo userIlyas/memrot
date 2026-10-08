@@ -159,8 +159,35 @@ Validation on Linux/Python 3.12:
 - Full `python -m pytest -ra`: **547 passed, 5 skipped** (stand source/dependencies
   unavailable). `git diff --check` passed.
 
-Existing benign cases without a checkable marker now remain inconclusive;
-separate control evaluation and metric grouping are the next stage.
+## F0-07 — separate attack, benign and diagnostic metrics
 
-Next: **F0-07**, separate attack, benign and diagnostic metrics. F0-07 and
-subsequent tasks remain outstanding.
+Implemented:
+
+- Explicit `case_kind`, with both domain control catalogs routed through the
+  `benign_control` channel. Missing control channels skip without attacker fallback.
+- Attack-only ASR and separate memory/jailbreak denominators; controls and
+  diagnostics remain visible in coverage and verdict counts.
+- Per-group selected/eligible/evaluated/excluded counts, including unsupported-only
+  categories. Missing selected results become explicit NOT_EVALUATED records.
+- Selected inventories include actual adaptive rounds; controls and diagnostics
+  are excluded from attack rewriting and success charts.
+- Separate control response availability, explicit substring utility checks,
+  false-positive measurements and transport errors. Empty markers or unavailable
+  responses never enter the FPR denominator.
+- JSON/Markdown/HTML and CLI gate updated. Schema 2.1 records attack-only-v1
+  metric semantics; older documents retain explicitly labeled mixed-case metrics.
+
+Validation on Linux/Python 3.12:
+
+- 28 added regression cases cover the 1 attack + 9 controls denominator,
+  unsupported categories, count conservation, channel isolation, independent
+  utility/FPR oracles, mutation/adaptive behavior, report compatibility and gates.
+- Full `python -m pytest -ra`: **575 passed, 5 skipped** (stand source/dependencies
+  unavailable). `git diff --check` passed.
+
+Utility currently uses an explicitly configured exact substring, not a semantic
+judge. Controls without an oracle remain inconclusive and still report transport
+health separately.
+
+Next: **F0-08**, persist the phase journal and evidence links. F0-08 and subsequent
+tasks remain outstanding.

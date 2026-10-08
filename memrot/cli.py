@@ -80,6 +80,8 @@ def _group_key(variant_or_result) -> str:
 def _results_table_rows(results):
     groups: "dict[str, list[int]]" = {}
     for r in results:
+        if r.case_kind != "attack":
+            continue
         key = _group_key(r)
         bucket = groups.setdefault(key, [0, 0, 0])
         if r.verdict == Verdict.CONFIRMED:
@@ -291,11 +293,13 @@ def _cmd_run(args: argparse.Namespace, cleanup: ExitStack) -> int:
             from .reporting.aggregate import aggregate
             run_id = default_run_id()
             results = []
+            selected_inventory = list(variants)
             on_item, close_progress = ui.make_progress(len(variants), desc="Attacking") if fancy else (None, None)
             for i, seed in enumerate(variants):
                 seed_results = run_adaptive(
                     seed, config.channels, adapter, detector, tracer, run_id,
                     attacker_llm=attacker_llm, max_rounds=args.adaptive_max_rounds,
+                    selected_inventory=selected_inventory,
                 )
                 results.extend(seed_results)
                 if on_item is not None:
@@ -304,7 +308,7 @@ def _cmd_run(args: argparse.Namespace, cleanup: ExitStack) -> int:
                 close_progress()
             report = _RunReport(run_id=run_id, target_id=adapter.kind, results=results,
                                channels=list(config.channels), limitations=limitations,
-                               trace_path=tracer.path)
+                               trace_path=tracer.path, selected_variants=selected_inventory)
             aggregate(report)
         else:
             on_item, close_progress = ui.make_progress(len(variants), desc="Attacking") if fancy else (None, None)
@@ -384,11 +388,15 @@ def _emit_and_status(report: RunReport, args: argparse.Namespace,
             fh.write(html_text or emit_html(report, variants=variants))
 
     counts = report.counts_by_verdict
+    gate_counts = dict(counts)
+    gate_counts["CONFIRMED"] = sum(r.case_kind == "attack" and r.verdict is Verdict.CONFIRMED for r in report.results)
+    if any(r.case_kind != "attack" and (r.verdict is Verdict.CONFIRMED or r.control_utility is False) for r in report.results):
+        gate_counts["INCONCLUSIVE"] = gate_counts.get("INCONCLUSIVE", 0) + 1
     status = {
         "run_id": report.run_id,
         "counts_by_verdict": counts,
         "overall_asr": report.overall_asr.display if report.overall_asr else "n/a (0/0)",
-        "exit_code": _exit_code(counts, bool(getattr(args, "gate", False))),
+        "exit_code": _exit_code(gate_counts, bool(getattr(args, "gate", False))),
     }
     print(json.dumps(status, ensure_ascii=False), file=sys.stderr)
     return status["exit_code"]

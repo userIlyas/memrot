@@ -7,8 +7,8 @@ package stays portable to any target that implements ``TargetAdapter``.
 """
 from __future__ import annotations
 
-ATTACK_ENGINE_VERSION = "2.0.0"
-ATTACK_SCHEMA_VERSION = "2.0"
+ATTACK_ENGINE_VERSION = "2.1.0"
+ATTACK_SCHEMA_VERSION = "2.1"
 CATALOG_SCHEMA_VERSION = "1.0"
 
 # CLI-facing product version/tagline (the banner) -- deliberately separate from

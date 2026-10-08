@@ -29,13 +29,16 @@ _ADAPTIVE_SYSTEM = (
 def run_adaptive(seed: AttackVariant, channels: List[Channel], adapter: TargetAdapter,
                  detector: Detector, tracer: JSONLTracer, run_id: str, *,
                  attacker_llm: LLMClient, max_rounds: int = 3,
-                 technique_slugs: Sequence[str] = ("paraphrase", "roleplay_framing")
+                 technique_slugs: Sequence[str] = ("paraphrase", "roleplay_framing"),
+                 selected_inventory: Optional[List[AttackVariant]] = None
                  ) -> List[AttackResult]:
     """Iterate: run the variant; if not CONFIRMED, ask attacker_llm for a
     better payload from the previous probe/trigger response; repeat until
     CONFIRMED or ``max_rounds``. Adapter ERROR/NOT_EVALUATED aborts the remaining rounds
     (the ERROR result is kept). ``technique_slugs`` is accepted for the
     public contract; the rewrite itself is a single attacker-LLM call."""
+    if seed.case_kind != "attack":
+        return [run_variant(seed, channels, adapter, detector, tracer, run_id)]
     del technique_slugs  # contract surface; rewrite is a single attacker-LLM call
     results: List[AttackResult] = []
     current = seed
@@ -45,6 +48,8 @@ def run_adaptive(seed: AttackVariant, channels: List[Channel], adapter: TargetAd
             mutation_technique=f"adaptive_round_{round_idx}",
             source=current.source or "adaptive",
         )
+        if selected_inventory is not None and not any(v.id == tagged.id for v in selected_inventory):
+            selected_inventory.append(tagged)
         result = run_variant(tagged, channels, adapter, detector, tracer, run_id)
         result.mutation_technique = f"adaptive_round_{round_idx}"
         results.append(result)

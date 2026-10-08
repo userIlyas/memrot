@@ -15,7 +15,7 @@ def load_json_report(source: str) -> Dict[str, Any]:
     if not isinstance(data, dict) or not isinstance(data.get("results"), list):
         raise ValueError("expected an attack report object with results")
     version = data.get("schema_version", "1.0")
-    if version not in ("1.0", "2.0"):
+    if version not in ("1.0", "2.0", "2.1"):
         raise ValueError(f"unsupported attack report schema_version: {version!r}")
     if version == "1.0":
         data["schema_version"] = "1.0"
@@ -27,4 +27,8 @@ def load_json_report(source: str) -> Dict[str, Any]:
         data["limitations"] = notes
     elif data.get("verdict_semantics") != "evidence-aware-v2":
         raise ValueError("schema 2.0 requires evidence-aware-v2 verdict semantics")
+    if version == "2.1" and data.get("metrics_semantics") != "attack-only-v1":
+        raise ValueError("schema 2.1 requires attack-only-v1 metrics semantics")
+    if version in ("1.0", "2.0"):
+        data["metrics_semantics"] = "legacy-mixed-cases"
     return data

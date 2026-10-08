@@ -119,7 +119,7 @@ def _top_attacks_chart(report: RunReport, variants_by_id: Dict[str, AttackVarian
     that failed to land is shown as if it were a live example."""
     groups: Dict[str, dict] = {}
     for r in report.results:
-        if r.verdict.value != "CONFIRMED":
+        if r.case_kind != "attack" or r.verdict.value != "CONFIRMED":
             continue
         key = r.owasp_amg_category or (r.rule_ids[0] if r.rule_ids else "") or "(untagged)"
         g = groups.setdefault(key, {"count": 0, "examples": []})
@@ -166,6 +166,7 @@ def _result_row(r: dict) -> str:
         '<tr class="result-row" '
         f'data-search="{_esc((r.get("variant_id","") + " " + rule_ids + " " + str(r.get("owasp_amg_category","")) + " " + str(r.get("path_state","")) + " " + str(r.get("mutation_technique",""))).lower())}">'
         f'<td>{_esc(r.get("variant_id"))}</td>'
+        f'<td>{_esc(r.get("case_kind", "attack"))}</td>'
         f'<td><span class="chip" style="border-color:{color};color:{color}">{_esc(verdict)}</span><div class="muted">{_esc(r.get("inconclusive_reason") or "")}</div></td>'
         f'<td>{_esc(r.get("path_state") or "—")}</td>'
         f'<td>{_esc(r.get("owasp_amg_category") or "—")}</td>'
@@ -312,11 +313,14 @@ def emit_html(report: RunReport, variants: Optional[Iterable[AttackVariant]] = N
 <body>
 <div class="wrap">
   <h1>Attack run report: {_esc(report.run_id)}</h1>
-  <p class="muted">Verdict semantics: evidence-aware-v2 (report schema 2.0)</p>
+  <p class="muted">Verdict semantics: evidence-aware-v2 (report schema 2.1)</p>
   <div class="meta">Target: <code>{_esc(report.target_id)}</code> &middot; Started {started} &middot; Finished {finished}</div>
   <div class="kpi-row">{"".join(kpis)}</div>
   <div>{verdict_chips}</div>
 
+  <h2>Attack coverage and controls</h2>
+  <p>{_esc(report.coverage_by_case_kind)}</p>
+  <p>Controls (separate from ASR): {_esc(report.controls)}</p>
   <h2>Most Successful Attacks</h2>
   <p class="muted" style="margin-top:-6px">Ranked by how many attacks actually landed in each category. Hover (or tab to) a bar for the vulnerability it targets and a real example of the payload that got through.</p>
   {top_attacks_html}
@@ -333,7 +337,7 @@ def emit_html(report: RunReport, variants: Optional[Iterable[AttackVariant]] = N
   <h2>ASR by mutation technique</h2>
   {_metric_table(report.asr_by_mutation_technique, "no mutated variants in this run")}
 
-  <h2>ASR by threat model</h2>
+  <h2>Attack ASR by threat model</h2>
   {_metric_table(report.asr_by_threat_model, "no results in this run")}
 
   <h2>ASR by rule id</h2>
@@ -345,7 +349,7 @@ def emit_html(report: RunReport, variants: Optional[Iterable[AttackVariant]] = N
   <h2>Per-variant results ({len(report.results)})</h2>
   <input id="filter" type="text" placeholder="Filter by variant id, rule id, category, or mutation technique...">
   <table class="results-table">
-    <thead><tr><th>Variant</th><th>Verdict</th><th>Path state</th><th>Category</th><th>Rule IDs</th>
+    <thead><tr><th>Variant</th><th>Case kind</th><th>Verdict</th><th>Path state</th><th>Category</th><th>Rule IDs</th>
     <th>Mutation</th><th>Framing</th><th>Payload</th><th>Propagation</th></tr></thead>
     <tbody>{results_rows}</tbody>
   </table>

@@ -53,6 +53,8 @@ def load_catalog(paths: Iterable[str], strict: bool = True) -> List[AttackVarian
                 raise ValueError(f"{path}: duplicate variant id {v.get('id')!r} across catalog files")
             seen_ids.add(v.get("id"))
             variants.append(AttackVariant(
+                case_kind=v.get("case_kind", "benign_control" if v.get("framing") == "none" and v.get("payload") == "none" else "attack"),
+                expected_response=v.get("expected_response"),
                 id=v["id"], title=v.get("title", v["id"]), framing=v.get("framing", ""),
                 payload=v.get("payload", ""), layer=v.get("layer", "none"),
                 propagation=v.get("propagation", "single-turn"), probe=v.get("probe", ""),

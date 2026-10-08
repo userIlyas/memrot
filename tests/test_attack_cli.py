@@ -70,7 +70,7 @@ def test_run_end_to_end_against_in_process_http_target(http_server, monkeypatch,
         "schema_version": "1.0",
         "target": {"kind": "openai_compat",
                   "binding": {"base_url": f"http://127.0.0.1:{port}", "model": "test-model", "timeout": 5.0}},
-        "channels": [{"role": "attacker", "principal": {"principal_id": "1001", "credential_ref": "CUS_TEST"}}],
+        "channels": [{"role": "benign_control", "principal": {"principal_id": "1001", "credential_ref": "CUS_TEST"}}],
         "catalog_paths": [BENIGN],
     })
     out_dir = str(tmp_path / "out")
@@ -84,7 +84,7 @@ def test_run_end_to_end_against_in_process_http_target(http_server, monkeypatch,
     assert len(report["results"]) == 3   # 3 benign_control variants
     assert all(r["verdict"] == "INCONCLUSIVE" and r["inconclusive_reason"] for r in report["results"])
     assert report["overall_asr"]["total"] == 0
-    assert report["schema_version"] == "2.0"
+    assert report["schema_version"] == "2.1"
 
 
 def test_run_missing_config_field_is_a_clean_error(write_json):
@@ -145,12 +145,17 @@ def test_run_with_mutate_surfaces_failures_in_report_limitations(http_server, mo
 
     port = http_server.server_address[1]
     monkeypatch.setenv("MEMROT_CRED_CUS_TEST", "sk-test-cli")
+    with open(os.path.join(BENIGN, "catalog.json"), encoding="utf-8") as fh:
+        attack_catalog = json.load(fh)
+    for item in attack_catalog["variants"]:
+        item.update(case_kind="attack", attacker_role="attacker", framing="explicit_rule", payload="formatting_marker")
+    attack_path = write_json("mutation_attack_seeds.json", attack_catalog)
     config_path = write_json("cli_mutate_fail.config.json", {
         "schema_version": "1.0",
         "target": {"kind": "openai_compat",
                   "binding": {"base_url": f"http://127.0.0.1:{port}", "model": "test-model", "timeout": 5.0}},
         "channels": [{"role": "attacker", "principal": {"principal_id": "1001", "credential_ref": "CUS_TEST"}}],
-        "catalog_paths": [BENIGN],
+        "catalog_paths": [attack_path],
     })
     out_dir = str(tmp_path / "out")
     rc = main(["run", "--config", config_path, "--out", out_dir, "--mutate", "prefix_injection"])

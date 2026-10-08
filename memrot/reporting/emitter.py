@@ -29,7 +29,7 @@ def emit_markdown(report: RunReport) -> str:
     L = []
     L.append(f"# Attack run report: {report.run_id}")
     L.append("")
-    L.append("- Verdict semantics: evidence-aware-v2 (report schema 2.0)")
+    L.append("- Verdict semantics: evidence-aware-v2 (report schema 2.1)")
     L.append(f"- Target: `{esc(report.target_id)}`")
     L.append(f"- Channels: {', '.join(esc(c.channel_id) for c in report.channels)}")
     L.append(f"- Verdict counts: {esc(dict(report.counts_by_verdict))}")
@@ -37,12 +37,20 @@ def emit_markdown(report: RunReport) -> str:
         L.append(f"- **Overall ASR: {report.overall_asr.display}**")
     L.append("")
 
+    L.append("## Attack coverage and controls")
+    L.append("")
+    for kind, coverage in report.coverage_by_case_kind.items():
+        L.append(f"- {esc(kind)}: selected={coverage['selected']}, eligible={coverage['eligible']}, evaluated={coverage['evaluated']}, excluded={coverage['excluded']}")
+    for threat, metric in report.asr_by_threat_model.items():
+        L.append(f"- Attack ASR ({esc(threat)}): {metric.display}")
+    L.append(f"- Controls (separate from ASR): {esc(report.controls, limit=1000)}")
+    L.append("")
     L.append("## Per-variant verdicts")
     L.append("")
-    L.append("| Variant | Verdict | Path state | Rule IDs | Framing | Payload | Layer | Propagation |")
-    L.append("|---|---|---|---|---|---|---|---|")
+    L.append("| Variant | Case kind | Verdict | Path state | Rule IDs | Framing | Payload | Layer | Propagation |")
+    L.append("|---|---|---|---|---|---|---|---|---|")
     for r in report.results:
-        L.append(f"| {esc(r.variant_id)} | **{r.verdict.value}** | {esc(r.path_state or '—')} | "
+        L.append(f"| {esc(r.variant_id)} | {esc(r.case_kind)} | **{r.verdict.value}** | {esc(r.path_state or '—')} | "
                  f"{esc(', '.join(r.rule_ids) or '—')} | "
                  f"{esc(r.framing)} | {esc(r.payload)} | {esc(r.layer)} | {esc(r.propagation)} |")
     L.append("")

@@ -150,6 +150,8 @@ class Channel:
 # Attack catalog
 # --------------------------------------------------------------------------- #
 
+CASE_KIND_VALUES = ("attack", "benign_control", "diagnostic")
+
 FRAMING_VALUES = ("explicit_rule", "authority_compliance", "implicit_generalization",
                   "third_party_relay", "minja_bridging", "none")
 PAYLOAD_VALUES = ("formatting_marker", "false_citation_policy", "disclaimer_suppression",
@@ -194,6 +196,8 @@ class AttackVariant:
                                                                 # the one who triggered, to check cross-user leakage
     threat_model: str = "memory_poisoning"                    # memory_poisoning | llm_jailbreak_susceptibility
     notes: str = ""
+    case_kind: str = "attack"
+    expected_response: Optional[str] = None  # explicit substring utility oracle for controls
 
     def to_dict(self) -> Dict[str, Any]:
         return plain({f.name: getattr(self, f.name) for f in fields(self)})
@@ -281,6 +285,10 @@ class AttackResult:
     evidence_tier: EvidenceTier = "none"          # strongest channel that saw the canary, see EVIDENCE_TIER_ORDER
     chain_break_reason: Optional[str] = None      # CLEAN only: one of CHAIN_BREAK_VALUES, None = not diagnosed
     cleanup_error: Optional[str] = None          # tool rollback failure, kept separate from the primary error
+    case_kind: str = "attack"
+    control_response_received: bool = False
+    control_utility: Optional[bool] = None
+    control_false_positive: Optional[bool] = None
     inconclusive_reason: Optional[str] = None
     state_detection: Optional[DetectionResult] = None
     evidence_refs: List[Dict[str, str]] = field(default_factory=list)
@@ -299,6 +307,11 @@ class GroupMetric:
     key: str
     confirmed: int = 0
     total: int = 0   # CONFIRMED + CLEAN only -- INVALID/ERROR/NOT_EVALUATED never enter this ratio
+    selected: int = 0
+    eligible: int = 0
+    evaluated: int = 0
+    excluded: int = 0
+    counts_by_verdict: Dict[str, int] = field(default_factory=dict)
 
     @property
     def ratio(self) -> Optional[float]:
@@ -338,10 +351,13 @@ class RunReport:
     counts_by_verdict: Dict[str, int] = field(default_factory=dict)
     limitations: List[str] = field(default_factory=list)
     trace_path: Optional[str] = None
+    selected_variants: List[AttackVariant] = field(default_factory=list)
+    coverage_by_case_kind: Dict[str, Any] = field(default_factory=dict)
+    controls: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "schema_version": "2.0",
+            "schema_version": "2.1",
             "verdict_semantics": "evidence-aware-v2",
             "run_id": self.run_id,
             "target_id": self.target_id,
@@ -358,6 +374,10 @@ class RunReport:
             "asr_by_mutation_technique": {k: v.to_dict() for k, v in self.asr_by_mutation_technique.items()},
             "asr_by_threat_model": {k: v.to_dict() for k, v in self.asr_by_threat_model.items()},
             "asr_by_source": {k: v.to_dict() for k, v in self.asr_by_source.items()},
+            "selected_inventory": [{"id": v.id, "case_kind": v.case_kind, "threat_model": v.threat_model, "rule_ids": list(v.rule_ids), "owasp_amg_category": v.owasp_amg_category} for v in self.selected_variants],
+            "coverage_by_case_kind": plain(self.coverage_by_case_kind),
+            "controls": plain(self.controls),
+            "metrics_semantics": "attack-only-v1",
             "counts_by_verdict": dict(self.counts_by_verdict),
             "limitations": list(self.limitations),
             "trace_path": self.trace_path,

@@ -100,6 +100,10 @@ class LLMMutationGenerator(AttackGenerator):
         out: List[AttackVariant] = list(self.seed_variants) if self.keep_seeds else []
         self.failures = []
         for seed in self.seed_variants:
+            if seed.case_kind != "attack":
+                if not self.keep_seeds:
+                    out.append(seed)
+                continue
             produced = 0
             for technique in self.techniques:
                 if self.max_mutations_per_seed is not None and produced >= self.max_mutations_per_seed:
